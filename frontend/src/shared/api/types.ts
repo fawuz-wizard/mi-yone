@@ -171,15 +171,25 @@ export interface PerformanceResponse {
   direction: "up" | "down" | "flat";
 }
 
+export interface Category {
+  id: string;
+  name: string;
+  kind: TransactionType;
+}
+
 export interface CreateTransactionInput {
   type: TransactionType;
   amount_minor: number;
+  category_id?: string;
   description?: string;
-  occurred_at?: string;
+  occurred_at?: string; // backdating allowed; created_at never lies (Phase 2 §7)
   source: TransactionSource;
 }
 
 export interface FixTransactionInput {
-  amount_minor: number;
+  amount_minor?: number;
+  category_id?: string;
+  description?: string;
+  occurred_at?: string;
   reason: string;
 }

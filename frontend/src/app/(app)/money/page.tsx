@@ -20,6 +20,8 @@ import { DebtCard } from "@/features/money/DebtCard";
 import { DebtDetailSheet } from "@/features/money/DebtDetailSheet";
 import { MoneyTable } from "@/features/money/MoneyTable";
 import { useDebts } from "@/features/money/api";
+import { useCategories } from "@/features/capture/api";
+import { ChipPicker } from "@/shared/design-system/ChipPicker";
 import { useT } from "@/shared/i18n";
 
 type Tab = "all" | "in" | "out" | "owed" | "owe";
@@ -41,11 +43,26 @@ function MoneyScreen() {
   const [selected, setSelected] = useState<Transaction | null>(null);
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
 
+  const [datePreset, setDatePreset] = useState<"all" | "today" | "7d" | "30d">("all");
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+
   const isDebtTab = tab === "owed" || tab === "owe";
-  const typeParam = tab === "in" ? "?type=INCOME" : tab === "out" ? "?type=EXPENSE" : "";
+  const kind = tab === "in" ? "INCOME" : tab === "out" ? "EXPENSE" : null;
+  const categoriesQuery = useCategories(kind ?? "EXPENSE", kind !== null);
+  const categoryName = categoryId ? (categoriesQuery.data ?? []).find((c) => c.id === categoryId)?.name : undefined;
+
+  // Server-side filters (Phase 5 rule: the server slices the ledger, the client displays).
+  const params2 = new URLSearchParams();
+  if (kind) params2.set("type", kind);
+  if (categoryName) params2.set("category", categoryName);
+  if (datePreset !== "all") {
+    const days = datePreset === "today" ? 0 : datePreset === "7d" ? 6 : 29;
+    const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    params2.set("from", from);
+  }
   const listQuery = useQuery({
-    queryKey: ["transactions", tab],
-    queryFn: () => api<Transaction[]>(`/businesses/${BUSINESS_ID}/transactions${typeParam}`),
+    queryKey: ["transactions", tab, datePreset, categoryName ?? "any"],
+    queryFn: () => api<Transaction[]>(`/businesses/${BUSINESS_ID}/transactions?${params2.toString()}`),
     enabled: !isDebtTab,
   });
   const debtsQuery = useDebts(tab === "owe" ? "payable" : "receivable", isDebtTab);
@@ -81,6 +98,7 @@ function MoneyScreen() {
         onChange={(v) => {
           setTab(v);
           setQuery("");
+          setCategoryId(null);
         }}
         tabs={[
           { value: "all", label: t("money.tabAll") },
@@ -91,6 +109,47 @@ function MoneyScreen() {
         ]}
       />
       <SearchField value={query} onChange={setQuery} />
+
+      {/* Date history + category filters (server-side; scope everything below) */}
+      {!isDebtTab ? (
+        <div className="space-y-2">
+          <div role="radiogroup" aria-label={t("filter.dateLabel")} className="flex flex-wrap gap-2">
+            {(
+              [
+                ["all", t("filter.all")],
+                ["today", t("filter.today")],
+                ["7d", t("filter.7d")],
+                ["30d", t("filter.30d")],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={datePreset === value}
+                onClick={() => setDatePreset(value)}
+                data-testid={`filter-${value}`}
+                className={`min-h-[44px] rounded-pill border px-3 text-[13px] font-semibold transition-colors duration-fast ${
+                  datePreset === value
+                    ? "border-brand bg-brand-tint text-brand"
+                    : "border-border bg-surface text-text-secondary"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {kind && (categoriesQuery.data?.length ?? 0) > 0 ? (
+            <ChipPicker
+              label={t("filter.categoryLabel")}
+              options={(categoriesQuery.data ?? []).map((c) => ({ id: c.id, label: c.name }))}
+              selectedId={categoryId}
+              onSelect={setCategoryId}
+              visibleCount={4}
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       {isDebtTab ? (
         debtsQuery.isPending ? (

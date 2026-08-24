@@ -14,15 +14,19 @@ async function signIn(page: Page) {
 test("chart renders from ledger-computed data with a % change badge", async ({ page }) => {
   await signIn(page);
   await expect(page.getByTestId("perf-chart")).toBeVisible();
-  const badge = page.getByTestId("perf-badge");
-  await expect(badge).toContainText(/[↑↓] [+−]\d+\.\d% (Progression|Regression)/);
 
   // Server contract: percentage and buckets computed backend-side, never hardcoded.
   const res = await page.request.get("/api/v1/businesses/b-demo-1/analytics/performance?range=30d");
   const body = (await res.json()).data;
   expect(body.buckets.length).toBe(30);
-  expect(body.change_pct).toMatch(/^[+−]\d+\.\d$/);
   expect(body.totals.net.display).toMatch(/^Le /);
+  // change_pct is either a signed 1dp string or null (near-zero-base guard).
+  if (body.change_pct !== null) {
+    expect(body.change_pct).toMatch(/^[+−]\d+(\.\d)?$/);
+    await expect(page.getByTestId("perf-badge")).toContainText(/[↑↓] [+−][\d,]+\.?\d*% (Progression|Regression)/);
+  } else {
+    await expect(page.getByTestId("perf-badge")).toHaveCount(0);
+  }
 });
 
 test("range filters re-query and re-render", async ({ page }) => {

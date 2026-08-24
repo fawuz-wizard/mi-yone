@@ -15,6 +15,7 @@ import { isDomainError } from "@/shared/api/client";
 import { captureQueue } from "@/shared/capture-queue";
 import { useT } from "@/shared/i18n";
 import {
+  useCategories,
   useCreateCustomer,
   useCreateSale,
   useCreateTransaction,
@@ -60,6 +61,7 @@ export function CaptureSheet({
   const isOpen = state.name !== "IDLE" && state.name !== "SUCCESS";
   const products = useProducts(isOpen && isSale);
   const customers = useCustomers(isOpen && isSale);
+  const categories = useCategories("EXPENSE", isOpen && !isSale);
 
   const [amount, setAmount] = useState<AmountState>(EMPTY_AMOUNT);
   const [note, setNote] = useState("");
@@ -67,6 +69,8 @@ export function CaptureSheet({
   const [quantity, setQuantity] = useState(1);
   const [payment, setPayment] = useState<"PAID" | "OWES">("PAID");
   const [customerId, setCustomerId] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [dateStr, setDateStr] = useState(""); // "" = today (default; backdating optional)
   const [paidNow, setPaidNow] = useState<AmountState>(EMPTY_AMOUNT);
   const [paidNowOpen, setPaidNowOpen] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -81,6 +85,8 @@ export function CaptureSheet({
     setQuantity(1);
     setPayment("PAID");
     setCustomerId(null);
+    setCategoryId(null);
+    setDateStr("");
     setPaidNow(EMPTY_AMOUNT);
     setPaidNowOpen(false);
     setConfirmDiscard(false);
@@ -127,7 +133,9 @@ export function CaptureSheet({
       const input = {
         type: "EXPENSE" as const,
         amount_minor: amountMinor,
+        category_id: categoryId ?? undefined,
         description: note || undefined,
+        occurred_at: dateStr ? `${dateStr}T12:00:00` : undefined,
         source: "MANUAL" as const,
       };
       return { kind: "expense" as const, result: await createTx.mutateAsync({ input, idempotencyKey }) };
@@ -188,7 +196,7 @@ export function CaptureSheet({
         setState(submitFailedServer({ name: "SUBMITTING", kind, idempotencyKey }, "capture.saveFailed"));
       }
     }
-  }, [state, amount, paidNow, note, productId, quantity, payment, customerId, needsCustomer, customers.data, createSale, createTx, undo, toast, t, setState, handleClose]);
+  }, [state, amount, paidNow, note, productId, quantity, payment, customerId, categoryId, dateStr, needsCustomer, customers.data, createSale, createTx, undo, toast, t, setState, handleClose]);
 
   if (state.name === "IDLE" || !isOpen) return null;
   const kind = state.kind;
@@ -319,6 +327,16 @@ export function CaptureSheet({
             </div>
           ) : null}
 
+          {/* Category chips for expenses (seeded defaults, recent-first later). */}
+          {kind === "expense" && (categories.data?.length ?? 0) > 0 ? (
+            <ChipPicker
+              label={t("capture.category")}
+              options={(categories.data ?? []).map((c) => ({ id: c.id, label: c.name }))}
+              selectedId={categoryId}
+              onSelect={setCategoryId}
+            />
+          ) : null}
+
           <label className="block">
             <span className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
               {t("capture.whatFor")}
@@ -329,6 +347,23 @@ export function CaptureSheet({
               className="mt-1 min-h-[48px] w-full rounded-input border border-border-input bg-surface px-3 text-base"
             />
           </label>
+
+          {/* Business date — defaults to today; backdating allowed, future dates are not. */}
+          {kind === "expense" ? (
+            <label className="block">
+              <span className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
+                {t("capture.when")} ({t("capture.today")})
+              </span>
+              <input
+                type="date"
+                value={dateStr}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setDateStr(e.target.value)}
+                className="mt-1 min-h-[48px] w-full rounded-input border border-border-input bg-surface px-3 text-base"
+                data-testid="capture-date"
+              />
+            </label>
+          ) : null}
         </div>
       </BottomSheet>
 

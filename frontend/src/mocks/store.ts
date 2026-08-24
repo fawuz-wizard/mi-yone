@@ -126,11 +126,37 @@ function mk(
   };
 }
 
+// --- Categories (seeded defaults, Phase 2 M3) ---
+import type { Category } from "@/shared/api/types";
+
+export const categories: Category[] = [
+  { id: "cat-in-sales", name: "Sales", kind: "INCOME" },
+  { id: "cat-in-other", name: "Other income", kind: "INCOME" },
+  { id: "cat-ex-stock", name: "Stock purchase", kind: "EXPENSE" },
+  { id: "cat-ex-transport", name: "Transport", kind: "EXPENSE" },
+  { id: "cat-ex-rent", name: "Rent", kind: "EXPENSE" },
+  { id: "cat-ex-utilities", name: "Utilities", kind: "EXPENSE" },
+  { id: "cat-ex-wages", name: "Wages", kind: "EXPENSE" },
+  { id: "cat-ex-general", name: "General expense", kind: "EXPENSE" },
+];
+
+export function categoryName(categoryId: string | undefined, kind: "INCOME" | "EXPENSE"): string {
+  const found = categoryId ? categories.find((c) => c.id === categoryId && c.kind === kind) : undefined;
+  return found?.name ?? (kind === "INCOME" ? "Sales" : "General expense");
+}
+
 // --- Idempotency (Phase 2 §21): key → transaction id, replay returns the original ---
 const idempotency = new Map<string, string>();
 
 export function createTransaction(
-  input: { type: Transaction["type"]; amount_minor: number; description?: string; source: Transaction["source"] },
+  input: {
+    type: Transaction["type"];
+    amount_minor: number;
+    category_id?: string;
+    description?: string;
+    occurred_at?: string;
+    source: Transaction["source"];
+  },
   idempotencyKey: string | null,
 ): { transaction: Transaction; replay: boolean } {
   if (idempotencyKey && idempotency.has(idempotencyKey)) {
@@ -138,15 +164,21 @@ export function createTransaction(
     if (existing) return { transaction: existing, replay: true };
   }
   const now = new Date().toISOString();
+  // occurred_at may be backdated (never future); created_at never lies.
+  let occurredAt = now;
+  if (input.occurred_at) {
+    const parsed = new Date(input.occurred_at);
+    if (!Number.isNaN(parsed.getTime()) && parsed.getTime() <= Date.now()) occurredAt = parsed.toISOString();
+  }
   const t: Transaction = {
     id: id("t"),
     business_id: business.id,
     type: input.type,
     status: "POSTED",
     amount: formatMoney(input.amount_minor),
-    category_name: input.type === "INCOME" ? "Sales" : "General expense",
+    category_name: categoryName(input.category_id, input.type),
     description: input.description ?? null,
-    occurred_at: now,
+    occurred_at: occurredAt,
     created_at: now,
     recorded_by: MOCK_USER,
     source: input.source,
@@ -158,10 +190,20 @@ export function createTransaction(
   return { transaction: t, replay: false };
 }
 
-// --- Correction = reversal + corrected record, atomically (Phase 2 §8) ---
-export function fixTransaction(txId: string, newAmountMinor: number): Transaction | null {
+// --- Correction = reversal + corrected record, atomically (Phase 2 §8).
+// Any financial field may be corrected: amount, category, note, business date. ---
+export function fixTransaction(
+  txId: string,
+  changes: { amount_minor?: number; category_id?: string; description?: string; occurred_at?: string },
+): Transaction | null {
   const original = transactions.find((t) => t.id === txId && t.status === "POSTED");
   if (!original) return null;
+  const newAmountMinor = changes.amount_minor ?? original.amount.amount_minor;
+  let occurredAt = original.occurred_at;
+  if (changes.occurred_at) {
+    const parsed = new Date(changes.occurred_at);
+    if (!Number.isNaN(parsed.getTime()) && parsed.getTime() <= Date.now()) occurredAt = parsed.toISOString();
+  }
   original.status = "REVERSED";
   const now = new Date().toISOString();
   const reversal: Transaction = {
@@ -178,7 +220,9 @@ export function fixTransaction(txId: string, newAmountMinor: number): Transactio
     id: id("t"),
     status: "POSTED",
     amount: formatMoney(newAmountMinor),
-    occurred_at: original.occurred_at,
+    category_name: changes.category_id ? categoryName(changes.category_id, original.type) : original.category_name,
+    description: changes.description !== undefined ? changes.description || null : original.description,
+    occurred_at: occurredAt,
     created_at: now,
     reverses_transaction_id: null,
     fixed: { by: MOCK_USER, was: original.amount, now: formatMoney(newAmountMinor) },

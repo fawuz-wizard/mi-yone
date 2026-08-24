@@ -68,6 +68,26 @@
   "capture.addCustomer": "Add customer",
   "capture.paidNow": "Paid now (optional)",
   "capture.creditSavedToast": "Sale saved · {amount} · {name} owes you {owed}",
+  "capture.category": "Category",
+  "capture.when": "When?",
+  "capture.today": "Today",
+
+  "filter.dateLabel": "Period",
+  "filter.all": "All time",
+  "filter.today": "Today",
+  "filter.7d": "7 days",
+  "filter.30d": "30 days",
+  "filter.categoryLabel": "Category",
+  "filter.anyCategory": "All categories",
+
+  "detail.remove": "Remove this record",
+  "detail.removeTitle": "Remove this record?",
+  "detail.removeBody": "{amount} will be taken out of your books. It stays in your history as removed.",
+  "detail.removeDone": "Record removed",
+
+  "fix.newCategory": "Category",
+  "fix.newNote": "What was it for? (optional)",
+  "fix.newDate": "When",
 
   "chip.more": "More…",
   "chip.none": "None",

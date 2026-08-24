@@ -84,8 +84,11 @@ test("fix a record: correction preserves visible history, no delete exists", asy
   await page.getByRole("link", { name: "Money" }).click();
   await page.getByTestId("record-card").filter({ hasText: "Le 4,500" }).first().click();
 
-  await expect(page.getByRole("dialog")).not.toContainText(/delete/i); // no delete action, ever
+  await expect(page.getByRole("dialog")).not.toContainText(/delete/i); // no hard-delete action, ever
   await page.getByTestId("fix-record").click();
+  // The fix form pre-fills the current amount (Le 4,500) — clear it, then correct.
+  const backspace = page.getByRole("button", { name: "Delete last digit" });
+  for (let i = 0; i < 4; i += 1) await backspace.click();
   await typeAmount(page, "45000");
   await page.getByTestId("fix-continue").click();
   await expect(page.getByRole("alertdialog")).toContainText("Le 4,500");

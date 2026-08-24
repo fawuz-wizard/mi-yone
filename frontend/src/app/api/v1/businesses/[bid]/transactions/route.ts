@@ -8,11 +8,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ bid:
   const unauthorized = requireSession(req);
   if (unauthorized) return unauthorized;
   await params;
-  const type = req.nextUrl.searchParams.get("type");
+  const sp = req.nextUrl.searchParams;
+  const type = sp.get("type");
+  const category = sp.get("category"); // category name (server filter)
+  const from = sp.get("from"); // ISO date, inclusive (business date)
+  const to = sp.get("to"); // ISO date, inclusive
   let rows = visibleTransactions();
   if (type === "INCOME" || type === "EXPENSE") rows = rows.filter((t) => t.type === type);
+  if (category) rows = rows.filter((t) => t.category_name === category);
+  if (from) rows = rows.filter((t) => t.occurred_at.slice(0, 10) >= from);
+  if (to) rows = rows.filter((t) => t.occurred_at.slice(0, 10) <= to);
   rows = [...rows].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
-  return ok(rows.slice(0, 50));
+  return ok(rows.slice(0, 100));
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ bid: string }> }) {

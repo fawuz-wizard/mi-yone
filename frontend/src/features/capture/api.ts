@@ -2,6 +2,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/shared/api/client";
 import type {
+  Category,
   CreateSaleInput,
   CreateTransactionInput,
   Customer,
@@ -38,6 +39,15 @@ export function useCreateSale() {
       void qc.invalidateQueries({ queryKey: ["debts"] });
       void qc.invalidateQueries({ queryKey: ["products"] });
     },
+  });
+}
+
+export function useCategories(kind: "INCOME" | "EXPENSE", enabled: boolean) {
+  return useQuery({
+    queryKey: ["categories", kind],
+    queryFn: () => api<Category[]>(`/businesses/${BUSINESS_ID}/categories?kind=${kind}`),
+    enabled,
+    staleTime: 5 * 60_000, // reference data
   });
 }
 

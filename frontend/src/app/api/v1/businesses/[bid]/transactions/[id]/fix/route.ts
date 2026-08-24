@@ -10,10 +10,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bid
   if (unauthorized) return unauthorized;
   const { id } = await params;
   const body = (await req.json().catch(() => null)) as FixTransactionInput | null;
-  if (!body || typeof body.amount_minor !== "number" || body.amount_minor <= 0) {
+  if (!body) return fail(422, err("VALIDATION_ERROR", "The correction is invalid."));
+  if (body.amount_minor !== undefined && (typeof body.amount_minor !== "number" || body.amount_minor <= 0)) {
     return fail(422, err("VALIDATION_ERROR", "The corrected amount is invalid."));
   }
-  const corrected = fixTransaction(id, body.amount_minor);
+  const corrected = fixTransaction(id, body);
   if (!corrected) return fail(409, err("CONFLICT", "This record was already fixed."));
   return ok(corrected);
 }
