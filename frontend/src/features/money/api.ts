@@ -24,6 +24,8 @@ export function useSettleDebt() {
       void qc.invalidateQueries({ queryKey: ["debts"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["party"] });
+      void qc.invalidateQueries({ queryKey: ["parties"] });
     },
   });
 }

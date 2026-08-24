@@ -121,6 +121,7 @@ function mk(
     created_at: occurredAt,
     recorded_by: MOCK_USER,
     source,
+    counterparty_id: null,
     reverses_transaction_id: null,
     fixed: null,
   };
@@ -155,6 +156,7 @@ export function createTransaction(
     category_id?: string;
     description?: string;
     occurred_at?: string;
+    counterparty_id?: string;
     source: Transaction["source"];
   },
   idempotencyKey: string | null,
@@ -182,6 +184,7 @@ export function createTransaction(
     created_at: now,
     recorded_by: MOCK_USER,
     source: input.source,
+    counterparty_id: input.counterparty_id ?? null,
     reverses_transaction_id: null,
     fixed: null,
   };
@@ -532,13 +535,102 @@ export function stockCheck(productId: string, input: StockCheckInput): { product
   return { product: toProduct(row), movement };
 }
 
-export const customers: Customer[] = [
-  { id: "c-201", name: "Aminata", phone: "+232 76 000001" },
-  { id: "c-202", name: "Foday", phone: "+232 76 000002" },
-  { id: "c-203", name: "Isatu", phone: null },
+interface PartyRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  notes: string | null;
+  archived: boolean;
+}
+
+export const customerRows: PartyRow[] = [
+  { id: "c-201", name: "Aminata", phone: "+232 76 000001", notes: null, archived: false },
+  { id: "c-202", name: "Foday", phone: "+232 76 000002", notes: null, archived: false },
+  { id: "c-203", name: "Isatu", phone: null, notes: null, archived: false },
 ];
 
-export const suppliers: Supplier[] = [{ id: "s-301", name: "Musa Wholesale", phone: "+232 76 000009" }];
+export const supplierRows: PartyRow[] = [
+  { id: "s-301", name: "Musa Wholesale", phone: "+232 76 000009", notes: null, archived: false },
+];
+
+export function outstandingFor(counterpartyId: string): number {
+  return debts
+    .filter((d) => d.counterparty_id === counterpartyId)
+    .reduce((a, d) => a + (d.amount_minor - d.settled_minor), 0);
+}
+
+function toParty(row: PartyRow): Customer {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    notes: row.notes,
+    archived: row.archived,
+    outstanding: formatMoney(outstandingFor(row.id)),
+  };
+}
+
+export function listParties(kind: "customer" | "supplier", includeArchived = false): Customer[] {
+  const rows = kind === "customer" ? customerRows : supplierRows;
+  return rows
+    .filter((r) => includeArchived || !r.archived)
+    .map(toParty)
+    .sort((a, b) => b.outstanding.amount_minor - a.outstanding.amount_minor || a.name.localeCompare(b.name));
+}
+
+export function updateParty(
+  kind: "customer" | "supplier",
+  partyId: string,
+  input: { name?: string; phone?: string; notes?: string; archived?: boolean },
+): Customer | null {
+  const rows = kind === "customer" ? customerRows : supplierRows;
+  const row = rows.find((r) => r.id === partyId);
+  if (!row) return null;
+  if (input.name !== undefined) row.name = input.name.trim() || row.name;
+  if (input.phone !== undefined) row.phone = input.phone.trim() || null;
+  if (input.notes !== undefined) row.notes = input.notes.trim() || null;
+  if (input.archived !== undefined) row.archived = input.archived;
+  return toParty(row);
+}
+
+export function partyDetail(kind: "customer" | "supplier", partyId: string) {
+  const rows = kind === "customer" ? customerRows : supplierRows;
+  const row = rows.find((r) => r.id === partyId);
+  if (!row) return null;
+  const openDebts = debts
+    .filter((d) => d.counterparty_id === partyId && d.amount_minor - d.settled_minor > 0)
+    .map(toDebt);
+  const history = visibleTransactions()
+    .filter((t) => t.counterparty_id === partyId)
+    .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+    .slice(0, 30);
+  return { party: toParty(row), open_debts: openDebts, history };
+}
+
+export function addManualDebt(
+  kind: "receivable" | "payable",
+  input: { counterparty_id: string; amount_minor: number },
+): Debt | null {
+  const rows = kind === "receivable" ? customerRows : supplierRows;
+  const row = rows.find((r) => r.id === input.counterparty_id);
+  if (!row || input.amount_minor <= 0) return null;
+  const debtRow: DebtRow = {
+    id: id(kind === "receivable" ? "r" : "pay"),
+    kind,
+    counterparty_id: row.id,
+    counterparty_name: row.name,
+    amount_minor: input.amount_minor,
+    settled_minor: 0,
+    since: new Date().toISOString(),
+    due_date: null,
+  };
+  debts.push(debtRow);
+  return toDebt(debtRow);
+}
+
+// Back-compat views used by sale/stock orchestration:
+export const customers = { find: (fn: (c: PartyRow) => boolean) => customerRows.find(fn) };
+export const suppliers = { find: (fn: (s: PartyRow) => boolean) => supplierRows.find(fn) };
 
 interface DebtRow {
   id: string;
@@ -608,7 +700,13 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
   let transaction = null;
   if (paid > 0) {
     transaction = createTransaction(
-      { type: "INCOME", amount_minor: paid, description: input.description ?? product?.name, source: "SALE" },
+      {
+        type: "INCOME",
+        amount_minor: paid,
+        description: input.description ?? product?.name,
+        counterparty_id: input.customer_id,
+        source: "SALE",
+      },
       idempotencyKey ? `${idempotencyKey}:cash` : null,
     ).transaction;
   }
@@ -647,6 +745,7 @@ export function settleDebt(debtId: string, amountMinor: number): SettlementResul
       type: isReceivable ? "INCOME" : "EXPENSE",
       amount_minor: amountMinor,
       description: isReceivable ? `Payment from ${row.counterparty_name}` : `Payment to ${row.counterparty_name}`,
+      counterparty_id: row.counterparty_id,
       source: "SETTLEMENT",
     },
     null,

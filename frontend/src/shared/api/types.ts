@@ -25,6 +25,7 @@ export interface Transaction {
   created_at: string;
   recorded_by: string;
   source: TransactionSource;
+  counterparty_id: string | null; // customer/supplier this row concerns, when known
   reverses_transaction_id: string | null;
   fixed?: { by: string; was: Money; now: Money } | null;
 }
@@ -156,12 +157,30 @@ export interface Customer {
   id: string;
   name: string;
   phone: string | null;
+  notes: string | null;
+  archived: boolean;
+  outstanding: Money; // derived server-side from open debts
 }
 
 export interface Supplier {
   id: string;
   name: string;
   phone: string | null;
+  notes: string | null;
+  archived: boolean;
+  outstanding: Money; // derived server-side from open debts
+}
+
+export interface CounterpartyDetail<T> {
+  party: T;
+  open_debts: Debt[];
+  history: Transaction[]; // counterparty-linked ledger rows, newest first
+}
+
+export interface CreateDebtInput {
+  counterparty_id: string;
+  amount_minor: number;
+  note?: string;
 }
 
 /** Receivable ("Owes you") / Payable ("You owe") — user language, server truth. */
