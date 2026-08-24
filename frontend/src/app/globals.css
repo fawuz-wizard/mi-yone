@@ -1,0 +1,49 @@
+@import "../shared/design-system/tokens/tokens.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* MI YONE base — Phase 4 §5–§8. System fonts only (no webfont downloads). */
+html {
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+body {
+  min-height: 100dvh;
+}
+
+/* Every number in MI YONE is tabular (Phase 4 §5). */
+.tabular, .money {
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+/* Always-visible focus ring (Phase 4 §6/§29). */
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes miy-sheet-in {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes miy-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes miy-shimmer {
+  0% { opacity: 0.55; }
+  50% { opacity: 0.85; }
+  100% { opacity: 0.55; }
+}

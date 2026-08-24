@@ -1,0 +1,20 @@
+{
+  "color": {
+    "paper":  { "50": "#FAF7F1", "100": "#F3EFE7", "200": "#EFE9DF" },
+    "ink":    { "900": "#1F1912", "600": "#5C544A", "400": "#8A8177" },
+    "clay":   { "500": "#9A4520", "700": "#6E3117", "100": "#F3E4DA" },
+    "green":  { "600": "#1B7A4B", "100": "#E3F2E9" },
+    "amber":  { "700": "#8A5B00", "100": "#FBEED3" },
+    "red":    { "600": "#B3261E", "100": "#FBE7E5" },
+    "slate":  { "600": "#3D5A80", "100": "#E4EAF2" },
+    "white":  { "0": "#FFFFFF" },
+    "border": { "hairline": "#E6DFD4", "input": "#C9BFB0" }
+  },
+  "space": { "1": "4px", "2": "8px", "3": "12px", "4": "16px", "5": "20px", "6": "24px", "7": "32px", "8": "40px", "9": "48px", "10": "64px" },
+  "radius": { "input": "10px", "card": "14px", "sheet": "20px", "dialog": "16px", "pill": "999px" },
+  "shadow": {
+    "1": "0 2px 8px rgba(31,25,18,0.10)",
+    "2": "0 8px 24px rgba(31,25,18,0.16)"
+  },
+  "motion": { "fast": "120ms", "normal": "200ms", "slow": "320ms", "ease": "cubic-bezier(0.2, 0, 0, 1)" }
+}
