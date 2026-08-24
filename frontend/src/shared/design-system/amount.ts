@@ -47,6 +47,16 @@ export function atCap(state: AmountState): boolean {
   return state.decimal === null && state.whole.length >= MAX_WHOLE_DIGITS;
 }
 
+/** Build an AmountState from server minor units — for pre-filled edits (input state, not calculation). */
+export function fromMinor(minor: number): AmountState {
+  const whole = Math.trunc(minor / 100);
+  const cents = minor % 100;
+  return {
+    whole: whole === 0 ? (cents > 0 ? "0" : "") : String(whole),
+    decimal: cents > 0 ? String(cents).padStart(2, "0") : null,
+  };
+}
+
 export function toMinor(state: AmountState): number {
   const whole = state.whole === "" ? 0 : parseInt(state.whole, 10);
   const cents = state.decimal ? parseInt(state.decimal.padEnd(2, "0"), 10) : 0;

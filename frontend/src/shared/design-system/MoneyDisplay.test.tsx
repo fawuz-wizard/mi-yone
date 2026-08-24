@@ -23,8 +23,8 @@ describe("MoneyDisplay (Phase 5 §10)", () => {
     expect(container.querySelector(".text-money-in")).toBeNull();
   });
 
-  it("announces sign in the accessible label", () => {
+  it("announces sign via screen-reader-only text", () => {
     render(<MoneyDisplay money={money} direction="out" />);
-    expect(screen.getByLabelText("minus Le 45,000")).toBeInTheDocument();
+    expect(screen.getByText("minus Le 45,000")).toHaveClass("sr-only");
   });
 });

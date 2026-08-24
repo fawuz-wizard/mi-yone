@@ -51,6 +51,7 @@ export interface AttentionItem {
   kind: "low_stock" | "owed_to_you" | "you_owe" | "unusual_spending";
   severity: "warning" | "danger";
   text: string;
+  target: string; // deep link to the screen where the fix happens
 }
 
 export interface Insight {
@@ -91,6 +92,65 @@ export interface Envelope<T> {
   data?: T;
   error?: ApiErrorBody;
   meta?: { page: number; per_page: number; total: number };
+}
+
+export interface Product {
+  id: string;
+  name: string;
+  price: Money;
+  stock: number;
+  low_stock_threshold: number;
+  track_inventory: boolean;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string | null;
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone: string | null;
+}
+
+/** Receivable ("Owes you") / Payable ("You owe") — user language, server truth. */
+export interface Debt {
+  id: string;
+  counterparty_id: string;
+  counterparty_name: string;
+  amount: Money; // original amount
+  outstanding: Money; // derived server-side from settlements
+  since: string; // ISO date the debt started
+  due_date: string | null;
+  overdue: boolean;
+  status: "OPEN" | "PARTIAL" | "SETTLED";
+}
+
+export interface CreateSaleInput {
+  amount_minor: number;
+  product_id?: string;
+  quantity?: number;
+  payment: "PAID" | "CREDIT" | "PARTIAL";
+  amount_paid_minor?: number; // for PARTIAL
+  customer_id?: string; // required for CREDIT/PARTIAL
+  description?: string;
+}
+
+export interface SaleResult {
+  transaction: Transaction | null; // the cash portion (null for full-credit sale)
+  receivable: Debt | null; // the credit portion
+  total: Money;
+}
+
+export interface CreateSettlementInput {
+  amount_minor: number;
+}
+
+export interface SettlementResult {
+  debt: Debt;
+  transaction: Transaction;
 }
 
 export interface CreateTransactionInput {

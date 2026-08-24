@@ -24,12 +24,15 @@ export function MoneyDisplay({
   const sign = direction === "in" ? "+" : direction === "out" ? "−" : null;
   const color =
     direction === "in" ? "text-money-in" : direction === "out" ? "text-money-out" : "text-text-primary";
-  const label =
-    sign === "+" ? `plus ${money.display}` : sign === "−" ? `minus ${money.display}` : money.display;
+  const className = `money whitespace-nowrap ${variantClass[variant]} ${color}`;
+  if (!sign) return <span className={className}>{money.display}</span>;
+  // Screen-reader text lives in an sr-only span (aria-label is prohibited on generic spans).
   return (
-    <span className={`money whitespace-nowrap ${variantClass[variant]} ${color}`} aria-label={label}>
-      {sign ? <span aria-hidden>{sign} </span> : null}
-      <span aria-hidden>{money.display}</span>
+    <span className={className}>
+      <span className="sr-only">{sign === "+" ? `plus ${money.display}` : `minus ${money.display}`}</span>
+      <span aria-hidden>
+        {sign} {money.display}
+      </span>
     </span>
   );
 }

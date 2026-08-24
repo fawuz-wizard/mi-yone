@@ -1,19 +1,27 @@
 "use client";
-// The Capture Engine (Phase 5 §19–22). ONE capture system for every money moment.
-// Slice scope: Sale (Money in) and Expense (Money out); further contexts plug into
-// the contextual slot without new architecture.
+// The Capture Engine (Phase 5 §19–22). ONE capture system for every money moment:
+// sale (paid / credit / partial), expense — and the same sheet pattern is reused by
+// debt payments (features/money). Idempotency key generated at OPEN.
 import { useCallback, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Minus, Plus } from "lucide-react";
 import { BottomSheet } from "@/shared/design-system/BottomSheet";
 import { AmountKeypad } from "@/shared/design-system/AmountKeypad";
 import { Button } from "@/shared/design-system/Button";
+import { ChipPicker } from "@/shared/design-system/ChipPicker";
 import { ConfirmDialog } from "@/shared/design-system/ConfirmDialog";
 import { useToast } from "@/shared/design-system/Toast";
-import { EMPTY_AMOUNT, isEmpty, toMinor, type AmountState } from "@/shared/design-system/amount";
+import { EMPTY_AMOUNT, fromMinor, isEmpty, toMinor, type AmountState } from "@/shared/design-system/amount";
 import { isDomainError } from "@/shared/api/client";
 import { captureQueue } from "@/shared/capture-queue";
 import { useT } from "@/shared/i18n";
-import { useCreateTransaction, useUndoTransaction } from "./api";
+import {
+  useCreateCustomer,
+  useCreateSale,
+  useCreateTransaction,
+  useCustomers,
+  useProducts,
+  useUndoTransaction,
+} from "./api";
 import {
   beginSubmit,
   closeCapture,
@@ -43,19 +51,38 @@ export function CaptureSheet({
 }) {
   const t = useT();
   const toast = useToast();
-  const create = useCreateTransaction();
+  const createTx = useCreateTransaction();
+  const createSale = useCreateSale();
+  const createCustomer = useCreateCustomer();
   const undo = useUndoTransaction();
+
+  const isSale = state.name !== "IDLE" && state.kind === "sale";
+  const isOpen = state.name !== "IDLE" && state.name !== "SUCCESS";
+  const products = useProducts(isOpen && isSale);
+  const customers = useCustomers(isOpen && isSale);
+
   const [amount, setAmount] = useState<AmountState>(EMPTY_AMOUNT);
   const [note, setNote] = useState("");
+  const [productId, setProductId] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [payment, setPayment] = useState<"PAID" | "OWES">("PAID");
+  const [customerId, setCustomerId] = useState<string | null>(null);
+  const [paidNow, setPaidNow] = useState<AmountState>(EMPTY_AMOUNT);
+  const [paidNowOpen, setPaidNowOpen] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
-  const activeKind = state.name === "IDLE" ? null : state.kind;
-  const isOpen = state.name !== "IDLE" && state.name !== "SUCCESS";
   const dirty = !isEmpty(amount);
+  const needsCustomer = isSale && payment === "OWES" && !customerId;
 
   const reset = useCallback(() => {
     setAmount(EMPTY_AMOUNT);
     setNote("");
+    setProductId(null);
+    setQuantity(1);
+    setPayment("PAID");
+    setCustomerId(null);
+    setPaidNow(EMPTY_AMOUNT);
+    setPaidNowOpen(false);
     setConfirmDiscard(false);
   }, []);
 
@@ -64,42 +91,87 @@ export function CaptureSheet({
     onClose();
   }, [reset, onClose]);
 
+  // Selecting a product pre-fills the amount from its server price × quantity.
+  // This is input assistance only — the server re-validates the submitted sale.
+  function applyProduct(id: string | null, qty: number) {
+    setProductId(id);
+    setQuantity(qty);
+    const product = products.data?.find((p) => p.id === id);
+    if (product) setAmount(fromMinor(product.price.amount_minor * qty));
+  }
+
   const submit = useCallback(async () => {
     if (state.name !== "EDITING" && state.name !== "OPEN" && state.name !== "SERVER_ERROR") return;
-    if (isEmpty(amount)) return;
+    if (isEmpty(amount) || needsCustomer) return;
     const kind = state.kind;
     const idempotencyKey = state.idempotencyKey;
     const amountMinor = toMinor(amount);
-    const editing: CaptureState = { name: "EDITING", kind, idempotencyKey };
-    setState(beginSubmit(editing));
-    const input = {
-      type: kind === "sale" ? ("INCOME" as const) : ("EXPENSE" as const),
-      amount_minor: amountMinor,
-      description: note || undefined,
-      source: kind === "sale" ? ("SALE" as const) : ("MANUAL" as const),
+    const paidNowMinor = toMinor(paidNow);
+    setState(beginSubmit({ name: "EDITING", kind, idempotencyKey }));
+
+    const customerName = customers.data?.find((c) => c.id === customerId)?.name ?? "";
+
+    const perform = async () => {
+      if (kind === "sale") {
+        const input = {
+          amount_minor: amountMinor,
+          product_id: productId ?? undefined,
+          quantity: productId ? quantity : undefined,
+          payment: payment === "PAID" ? ("PAID" as const) : paidNowMinor > 0 ? ("PARTIAL" as const) : ("CREDIT" as const),
+          amount_paid_minor: payment === "OWES" && paidNowMinor > 0 ? paidNowMinor : undefined,
+          customer_id: payment === "OWES" ? (customerId ?? undefined) : undefined,
+          description: note || undefined,
+        };
+        return { kind: "sale" as const, result: await createSale.mutateAsync({ input, idempotencyKey }) };
+      }
+      const input = {
+        type: "EXPENSE" as const,
+        amount_minor: amountMinor,
+        description: note || undefined,
+        source: "MANUAL" as const,
+      };
+      return { kind: "expense" as const, result: await createTx.mutateAsync({ input, idempotencyKey }) };
     };
+
     try {
-      const tx = await create.mutateAsync({ input, idempotencyKey });
+      const outcome = await perform();
       setState(submitSucceeded({ name: "SUBMITTING", kind, idempotencyKey }));
-      toast.show({
-        message: t("capture.savedToast", { amount: tx.amount.display }),
-        undo: () => void undo.mutateAsync(tx.id),
-      });
+      if (outcome.kind === "sale") {
+        const { transaction, receivable, total } = outcome.result;
+        if (receivable) {
+          toast.show({
+            message: t("capture.creditSavedToast", {
+              amount: total.display,
+              name: customerName,
+              owed: receivable.outstanding.display,
+            }),
+          });
+        } else if (transaction) {
+          toast.show({
+            message: t("capture.savedToast", { amount: transaction.amount.display }),
+            undo: () => void undo.mutateAsync(transaction.id),
+          });
+        }
+      } else {
+        const tx = outcome.result;
+        toast.show({
+          message: t("capture.savedToast", { amount: tx.amount.display }),
+          undo: () => void undo.mutateAsync(tx.id),
+        });
+      }
       handleClose();
     } catch (e) {
       if (isDomainError(e) && e.kind === "network") {
-        // OFFLINE_PENDING: hand the capture to the queue (same idempotency key → one record ever).
         setState(submitFailedNetwork({ name: "SUBMITTING", kind, idempotencyKey }));
-        const label = `${t(kind === "sale" ? "capture.sale" : "capture.expense")}`;
         captureQueue.enqueue({
           idempotencyKey,
-          label,
+          label: t(kind === "sale" ? "capture.sale" : "capture.expense"),
           submittedAt: Date.now(),
           state: "pending",
           retry: async () => {
             captureQueue.setState(idempotencyKey, "saving");
             try {
-              await create.mutateAsync({ input, idempotencyKey });
+              await perform();
               captureQueue.resolve(idempotencyKey);
             } catch (err) {
               captureQueue.setState(
@@ -116,15 +188,16 @@ export function CaptureSheet({
         setState(submitFailedServer({ name: "SUBMITTING", kind, idempotencyKey }, "capture.saveFailed"));
       }
     }
-  }, [state, amount, note, create, undo, toast, t, setState, handleClose]);
+  }, [state, amount, paidNow, note, productId, quantity, payment, customerId, needsCustomer, customers.data, createSale, createTx, undo, toast, t, setState, handleClose]);
 
-  if (!activeKind || !isOpen) return null;
+  if (state.name === "IDLE" || !isOpen) return null;
+  const kind = state.kind;
 
   return (
     <>
       <BottomSheet
         open
-        title={t(activeKind === "sale" ? "capture.titleSale" : "capture.titleExpense")}
+        title={t(kind === "sale" ? "capture.titleSale" : "capture.titleExpense")}
         onClose={handleClose}
         dirty={dirty}
         onConfirmDiscard={() => {
@@ -135,6 +208,7 @@ export function CaptureSheet({
           <Button
             fullWidth
             onClick={() => void submit()}
+            disabled={isEmpty(amount) || needsCustomer}
             loading={state.name === "SUBMITTING"}
             loadingLabel={t("common.save")}
             data-testid="capture-save"
@@ -143,12 +217,13 @@ export function CaptureSheet({
           </Button>
         }
       >
-        <div className="pb-4">
+        <div className="space-y-4 pb-4">
           {state.name === "SERVER_ERROR" ? (
-            <div role="alert" className="mb-3 rounded-card bg-danger-fill p-3 text-sm font-medium text-danger">
+            <div role="alert" className="rounded-card bg-danger-fill p-3 text-sm font-medium text-danger">
               {t(state.messageId)}
             </div>
           ) : null}
+
           <AmountKeypad
             value={amount}
             onChange={(next) => {
@@ -156,7 +231,95 @@ export function CaptureSheet({
               if (state.name === "OPEN") setState({ ...state, name: "EDITING" });
             }}
           />
-          <label className="mt-4 block">
+
+          {/* Contextual slot: product chips for sales (Phase 5 §19). */}
+          {kind === "sale" && (products.data?.length ?? 0) > 0 ? (
+            <div>
+              <ChipPicker
+                label={t("capture.product")}
+                options={(products.data ?? []).map((p) => ({ id: p.id, label: p.name, sublabel: p.price.display }))}
+                selectedId={productId}
+                onSelect={(id) => applyProduct(id, 1)}
+              />
+              {productId ? (
+                <div className="mt-2 flex items-center gap-3">
+                  <span className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
+                    {t("capture.quantity")}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      aria-label="−"
+                      onClick={() => applyProduct(productId, Math.max(1, quantity - 1))}
+                      className="flex h-11 w-11 items-center justify-center rounded-input bg-sunken"
+                    >
+                      <Minus size={16} aria-hidden />
+                    </button>
+                    <span className="tabular w-8 text-center text-base font-semibold">{quantity}</span>
+                    <button
+                      type="button"
+                      aria-label="+"
+                      onClick={() => applyProduct(productId, quantity + 1)}
+                      className="flex h-11 w-11 items-center justify-center rounded-input bg-sunken"
+                    >
+                      <Plus size={16} aria-hidden />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Paid / Owes you (Phase 5 §21) — default Paid, zero taps in the common case. */}
+          {kind === "sale" ? (
+            <div>
+              <p className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
+                {t("capture.paymentQuestion")}
+              </p>
+              <div role="radiogroup" aria-label={t("capture.paymentQuestion")} className="grid grid-cols-2 gap-2">
+                <PaymentOption
+                  icon={<ArrowDownToLine size={16} aria-hidden />}
+                  label={t("capture.paid")}
+                  selected={payment === "PAID"}
+                  onSelect={() => setPayment("PAID")}
+                  testId="payment-paid"
+                />
+                <PaymentOption
+                  icon={<ArrowUpFromLine size={16} aria-hidden />}
+                  label={t("capture.owesYou")}
+                  selected={payment === "OWES"}
+                  onSelect={() => setPayment("OWES")}
+                  testId="payment-owes"
+                />
+              </div>
+              {payment === "OWES" ? (
+                <div className="mt-3 space-y-3">
+                  <ChipPicker
+                    label={t("capture.customerQuestion")}
+                    options={(customers.data ?? []).map((c) => ({ id: c.id, label: c.name, sublabel: c.phone ?? undefined }))}
+                    selectedId={customerId}
+                    onSelect={setCustomerId}
+                    onCreate={async (name) => {
+                      const c = await createCustomer.mutateAsync(name);
+                      return { id: c.id, label: c.name };
+                    }}
+                    createLabel={t("capture.addCustomer")}
+                    createFieldLabel={t("capture.newCustomerName")}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setPaidNowOpen(true)}
+                    className="money flex min-h-[44px] w-full items-center justify-between rounded-input border border-border-input bg-surface px-3 text-sm font-medium"
+                  >
+                    <span className="text-text-secondary">{t("capture.paidNow")}</span>
+                    <span>{isEmpty(paidNow) ? "—" : `Le ${paidNowDisplay(paidNow)}`}</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <label className="block">
             <span className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
               {t("capture.whatFor")}
             </span>
@@ -168,6 +331,20 @@ export function CaptureSheet({
           </label>
         </div>
       </BottomSheet>
+
+      {/* Partial "paid now" entry — same AmountKeypad, own small sheet (no OS keyboard). */}
+      <BottomSheet open={paidNowOpen} title={t("capture.paidNow")} onClose={() => setPaidNowOpen(false)}
+        footer={
+          <Button fullWidth onClick={() => setPaidNowOpen(false)}>
+            {t("common.save")}
+          </Button>
+        }
+      >
+        <div className="pb-4">
+          <AmountKeypad value={paidNow} onChange={setPaidNow} />
+        </div>
+      </BottomSheet>
+
       <ConfirmDialog
         open={confirmDiscard}
         title={t("capture.discardTitle")}
@@ -182,6 +359,42 @@ export function CaptureSheet({
         onCancel={() => setConfirmDiscard(false)}
       />
     </>
+  );
+}
+
+function paidNowDisplay(state: AmountState): string {
+  const whole = state.whole === "" ? "0" : state.whole;
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return state.decimal === null ? grouped : `${grouped}.${state.decimal}`;
+}
+
+function PaymentOption({
+  icon,
+  label,
+  selected,
+  onSelect,
+  testId,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  selected: boolean;
+  onSelect: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      data-testid={testId}
+      className={`flex min-h-[48px] items-center justify-center gap-2 rounded-input border text-sm font-semibold transition-colors duration-fast ${
+        selected ? "border-brand bg-brand-tint text-brand" : "border-border bg-surface text-text-primary"
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

@@ -12,6 +12,8 @@ import { useCapture } from "@/features/shell/AppShell";
 import { EmptyState } from "@/shared/design-system/EmptyState";
 import { SkeletonList } from "@/shared/design-system/SkeletonList";
 import { Button } from "@/shared/design-system/Button";
+import { AttentionRow } from "@/shared/design-system/AttentionRow";
+import { InsightCard } from "@/shared/design-system/InsightCard";
 import { captureQueue } from "@/shared/capture-queue";
 import { useT } from "@/shared/i18n";
 
@@ -71,45 +73,24 @@ export default function HomePage() {
         stale={query.isPlaceholderData}
       />
 
-      {/* Needs attention */}
+      {/* Needs attention (max 4 rows, one tap from the fix — Phase 4 §13) */}
       {data.attention.length === 0 ? (
         <p className="rounded-card border border-border bg-surface px-4 py-3 text-sm font-medium text-money-in">
           {t("home.nothingNeedsAttention")}
         </p>
       ) : (
-        <section aria-label={t("home.needsAttention")} className="overflow-hidden rounded-card border border-border bg-surface">
-          {data.attention.map((a) => (
-            <div key={a.id} className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-0">
-              <span className="text-sm font-medium">{a.text}</span>
-            </div>
+        <section
+          aria-label={t("home.needsAttention")}
+          className="divide-y divide-border overflow-hidden rounded-card border border-border"
+        >
+          {data.attention.slice(0, 4).map((a) => (
+            <AttentionRow key={a.id} item={a} />
           ))}
         </section>
       )}
 
-      {/* One Partner insight (Phase 5 §35): calm card, clay edge + compass only. */}
-      {data.insight ? (
-        <section
-          aria-label={data.insight.statement}
-          className="rounded-card border border-border border-l-[3px] border-l-brand bg-surface p-4"
-        >
-          <div className="flex items-start gap-2">
-            <Compass aria-hidden size={20} strokeWidth={2} className="mt-0.5 shrink-0 text-brand" />
-            <div>
-              <h3 className="text-[17px] font-semibold">{data.insight.statement}</h3>
-              <p className="money mt-1 text-base font-semibold">{data.insight.figure}</p>
-              <p className="text-sm text-text-secondary">{data.insight.context}</p>
-              <p className="mt-2 inline-block rounded-pill bg-brand-tint px-2 py-0.5 text-[13px] font-semibold text-brand">
-                From your records
-              </p>
-              <div className="mt-2">
-                <Link href={data.insight.action_target} className="text-sm font-semibold text-brand underline-offset-2">
-                  {data.insight.action_label} →
-                </Link>
-              </div>
-            </div>
-          </div>
-        </section>
-      ) : null}
+      {/* One Partner insight (Phase 5 §35). */}
+      {data.insight ? <InsightCard insight={data.insight} provenanceLabel={t("partner.fromRecords")} /> : null}
 
       {!hasRecords ? (
         <EmptyState

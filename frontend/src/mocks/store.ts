@@ -249,7 +249,7 @@ export function dashboard(period: "today" | "week" | "month"): DashboardResponse
       }
     : null;
 
-  const attention: AttentionItem[] = [];
+  const attention: AttentionItem[] = attentionItems();
 
   return {
     business,
@@ -265,6 +265,172 @@ export function dashboard(period: "today" | "week" | "month"): DashboardResponse
     attention,
     insight,
   };
+}
+
+// ============================================================
+// MOCK: products, customers, suppliers, receivables, payables, sales
+// ============================================================
+import type { Customer, Debt, Product, Supplier, CreateSaleInput, SaleResult, SettlementResult } from "@/shared/api/types";
+
+export const products: Product[] = [
+  { id: "p-101", name: "Rice (50kg bag)", price: formatMoney(85_000_00), stock: 12, low_stock_threshold: 5, track_inventory: true },
+  { id: "p-102", name: "Cooking oil (5L)", price: formatMoney(30_000_00), stock: 3, low_stock_threshold: 5, track_inventory: true },
+  { id: "p-103", name: "Sugar (1kg)", price: formatMoney(4_500_00), stock: 40, low_stock_threshold: 10, track_inventory: true },
+  { id: "p-104", name: "Soap (bar)", price: formatMoney(1_500_00), stock: 58, low_stock_threshold: 12, track_inventory: true },
+];
+
+export const customers: Customer[] = [
+  { id: "c-201", name: "Aminata", phone: "+232 76 000001" },
+  { id: "c-202", name: "Foday", phone: "+232 76 000002" },
+  { id: "c-203", name: "Isatu", phone: null },
+];
+
+export const suppliers: Supplier[] = [{ id: "s-301", name: "Musa Wholesale", phone: "+232 76 000009" }];
+
+interface DebtRow {
+  id: string;
+  kind: "receivable" | "payable";
+  counterparty_id: string;
+  counterparty_name: string;
+  amount_minor: number;
+  settled_minor: number;
+  since: string;
+  due_date: string | null;
+}
+
+const debts: DebtRow[] = [
+  { id: "r-401", kind: "receivable", counterparty_id: "c-201", counterparty_name: "Aminata", amount_minor: 120_000_00, settled_minor: 0, since: daysAgo(12), due_date: daysAgo(2) },
+  { id: "r-402", kind: "receivable", counterparty_id: "c-202", counterparty_name: "Foday", amount_minor: 45_000_00, settled_minor: 0, since: daysAgo(20), due_date: daysAgo(-6) },
+  { id: "p-501", kind: "payable", counterparty_id: "s-301", counterparty_name: "Musa Wholesale", amount_minor: 200_000_00, settled_minor: 50_000_00, since: daysAgo(9), due_date: daysAgo(-5) },
+];
+
+function toDebt(row: DebtRow): Debt {
+  const outstanding = row.amount_minor - row.settled_minor;
+  const overdue = row.due_date !== null && new Date(row.due_date).getTime() < Date.now() && outstanding > 0;
+  return {
+    id: row.id,
+    counterparty_id: row.counterparty_id,
+    counterparty_name: row.counterparty_name,
+    amount: formatMoney(row.amount_minor),
+    outstanding: formatMoney(outstanding),
+    since: row.since,
+    due_date: row.due_date,
+    overdue,
+    status: outstanding === 0 ? "SETTLED" : row.settled_minor > 0 ? "PARTIAL" : "OPEN",
+  };
+}
+
+export function listDebts(kind: "receivable" | "payable"): Debt[] {
+  return debts
+    .filter((d) => d.kind === kind && d.amount_minor - d.settled_minor > 0)
+    .map(toDebt)
+    .sort((a, b) => Number(b.overdue) - Number(a.overdue) || a.since.localeCompare(b.since));
+}
+
+export function outstandingTotal(kind: "receivable" | "payable"): number {
+  return debts.filter((d) => d.kind === kind).reduce((a, d) => a + (d.amount_minor - d.settled_minor), 0);
+}
+
+// MOCK SIMPLIFICATION (documented): a credit sale records the CASH portion as an
+// income transaction and the credit portion as a receivable. Booked-revenue vs
+// cash accounting (Phase 2 §9 full model) arrives with the real backend; the
+// dashboard here is the CASH view, which stays honest under this simplification.
+export function createSale(input: CreateSaleInput, idempotencyKey: string | null): { result: SaleResult; replay: boolean } | null {
+  if (idempotencyKey && saleIdempotency.has(idempotencyKey)) {
+    return { result: saleIdempotency.get(idempotencyKey)!, replay: true };
+  }
+  const total = input.amount_minor;
+  const paid = input.payment === "PAID" ? total : input.payment === "CREDIT" ? 0 : Math.min(input.amount_paid_minor ?? 0, total);
+  const credit = total - paid;
+  if (total <= 0 || paid < 0) return null;
+  if (credit > 0 && !input.customer_id) return null;
+
+  const product = input.product_id ? products.find((p) => p.id === input.product_id) : undefined;
+  if (product && product.track_inventory) product.stock = Math.max(0, product.stock - (input.quantity ?? 1));
+
+  let transaction = null;
+  if (paid > 0) {
+    transaction = createTransaction(
+      { type: "INCOME", amount_minor: paid, description: input.description ?? product?.name, source: "SALE" },
+      idempotencyKey ? `${idempotencyKey}:cash` : null,
+    ).transaction;
+  }
+  let receivable: Debt | null = null;
+  if (credit > 0) {
+    const customer = customers.find((c) => c.id === input.customer_id);
+    const row: DebtRow = {
+      id: id("r"),
+      kind: "receivable",
+      counterparty_id: input.customer_id!,
+      counterparty_name: customer?.name ?? "Customer",
+      amount_minor: credit,
+      settled_minor: 0,
+      since: new Date().toISOString(),
+      due_date: null,
+    };
+    debts.push(row);
+    receivable = toDebt(row);
+  }
+  const result: SaleResult = { transaction, receivable, total: formatMoney(total) };
+  if (idempotencyKey) saleIdempotency.set(idempotencyKey, result);
+  return { result, replay: false };
+}
+
+const saleIdempotency = new Map<string, SaleResult>();
+
+export function settleDebt(debtId: string, amountMinor: number): SettlementResult | null {
+  const row = debts.find((d) => d.id === debtId);
+  if (!row) return null;
+  const outstanding = row.amount_minor - row.settled_minor;
+  if (amountMinor <= 0 || amountMinor > outstanding) return null; // over-settlement rejected (Phase 2 M7)
+  row.settled_minor += amountMinor;
+  const isReceivable = row.kind === "receivable";
+  const { transaction } = createTransaction(
+    {
+      type: isReceivable ? "INCOME" : "EXPENSE",
+      amount_minor: amountMinor,
+      description: isReceivable ? `Payment from ${row.counterparty_name}` : `Payment to ${row.counterparty_name}`,
+      source: "SETTLEMENT",
+    },
+    null,
+  );
+  return { debt: toDebt(row), transaction };
+}
+
+export function attentionItems(): AttentionItem[] {
+  const items: AttentionItem[] = [];
+  const low = products.filter((p) => p.track_inventory && p.stock <= p.low_stock_threshold);
+  if (low.length > 0) {
+    items.push({
+      id: "att-low-stock",
+      kind: "low_stock",
+      severity: "warning",
+      text: low.length === 1 ? `${low[0].name} is running low (${low[0].stock} left)` : `${low.length} products are running low`,
+      target: "/stock",
+    });
+  }
+  const owed = outstandingTotal("receivable");
+  const owedCount = listDebts("receivable").length;
+  if (owed > 0) {
+    items.push({
+      id: "att-owed",
+      kind: "owed_to_you",
+      severity: listDebts("receivable").some((d) => d.overdue) ? "danger" : "warning",
+      text: `${owedCount} ${owedCount === 1 ? "customer owes" : "customers owe"} you ${formatMoney(owed).display}`,
+      target: "/money?tab=owed",
+    });
+  }
+  const owe = outstandingTotal("payable");
+  if (owe > 0) {
+    items.push({
+      id: "att-owe",
+      kind: "you_owe",
+      severity: "warning",
+      text: `You owe suppliers ${formatMoney(owe).display}`,
+      target: "/money?tab=owe",
+    });
+  }
+  return items;
 }
 
 export function err(code: ApiErrorBody["code"], message: string): ApiErrorBody {
