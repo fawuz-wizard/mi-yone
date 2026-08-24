@@ -221,6 +221,26 @@ export interface SettlementResult {
   transaction: Transaction;
 }
 
+export type ReportPeriod = "today" | "week" | "month" | "last_month";
+
+export interface ReportResponse {
+  period: ReportPeriod;
+  period_label: string; // server-phrased, e.g. "1–24 Aug 2026"
+  cash: { money_in: Money; money_out: Money; left_over: Money };
+  profit: {
+    booked_revenue: Money; // sales incl. credit extended, excl. debt collections
+    booked_expenses: Money; // expenses incl. credit purchases, excl. debt payments
+    profit: Money; // estimated (Phase 3 §6.1)
+    credit_extended: Money; // the "customers still owe you" bridge
+  };
+  sales: {
+    count: number;
+    total: Money;
+    top_products: { name: string; units: number; revenue_estimate: Money }[];
+  };
+  expenses_by_category: { name: string; total: Money }[];
+}
+
 export type PerfRange = "7d" | "30d" | "3m" | "6m" | "1y";
 
 export interface PerfBucket {

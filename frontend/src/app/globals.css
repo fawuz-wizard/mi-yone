@@ -26,6 +26,23 @@ body {
   border-radius: 4px;
 }
 
+/* Print / Save-as-PDF: the report is the page; app chrome disappears. */
+@media print {
+  nav,
+  aside,
+  header,
+  [data-testid="fab-add"] {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  body {
+    background: #ffffff;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

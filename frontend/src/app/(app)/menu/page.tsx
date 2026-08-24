@@ -9,7 +9,7 @@ export default function MenuPage() {
   const items = [
     { href: "/customers", icon: Users, label: t("parties.customers"), sub: t("parties.customersQuestion"), enabled: true },
     { href: "/suppliers", icon: Truck, label: t("parties.suppliers"), sub: t("parties.suppliersQuestion"), enabled: true },
-    { href: "#", icon: BarChart3, label: t("menu.insights"), sub: t("menu.comingSoon"), enabled: false },
+    { href: "/insights", icon: BarChart3, label: t("menu.insights"), sub: t("reports.question"), enabled: true },
     { href: "#", icon: Settings, label: t("menu.settings"), sub: t("menu.comingSoon"), enabled: false },
     { href: "#", icon: UserCog, label: t("menu.people"), sub: t("menu.comingSoon"), enabled: false },
     { href: "#", icon: CircleHelp, label: t("menu.help"), sub: t("menu.comingSoon"), enabled: false },

@@ -517,6 +517,7 @@ export function addStock(productId: string, input: AddStockInput): { product: Pr
         settled_minor: 0,
         since: new Date().toISOString(),
         due_date: null,
+        source: "PURCHASE",
       });
     }
   }
@@ -623,6 +624,7 @@ export function addManualDebt(
     settled_minor: 0,
     since: new Date().toISOString(),
     due_date: null,
+    source: "MANUAL",
   };
   debts.push(debtRow);
   return toDebt(debtRow);
@@ -641,13 +643,22 @@ interface DebtRow {
   settled_minor: number;
   since: string;
   due_date: string | null;
+  source: "SALE" | "MANUAL" | "PURCHASE";
 }
 
 const debts: DebtRow[] = [
-  { id: "r-401", kind: "receivable", counterparty_id: "c-201", counterparty_name: "Aminata", amount_minor: 120_000_00, settled_minor: 0, since: daysAgo(12), due_date: daysAgo(2) },
-  { id: "r-402", kind: "receivable", counterparty_id: "c-202", counterparty_name: "Foday", amount_minor: 45_000_00, settled_minor: 0, since: daysAgo(20), due_date: daysAgo(-6) },
-  { id: "p-501", kind: "payable", counterparty_id: "s-301", counterparty_name: "Musa Wholesale", amount_minor: 200_000_00, settled_minor: 50_000_00, since: daysAgo(9), due_date: daysAgo(-5) },
+  { id: "r-401", kind: "receivable", counterparty_id: "c-201", counterparty_name: "Aminata", amount_minor: 120_000_00, settled_minor: 0, since: daysAgo(12), due_date: daysAgo(2), source: "SALE" },
+  { id: "r-402", kind: "receivable", counterparty_id: "c-202", counterparty_name: "Foday", amount_minor: 45_000_00, settled_minor: 0, since: daysAgo(20), due_date: daysAgo(-6), source: "SALE" },
+  { id: "p-501", kind: "payable", counterparty_id: "s-301", counterparty_name: "Musa Wholesale", amount_minor: 200_000_00, settled_minor: 50_000_00, since: daysAgo(9), due_date: daysAgo(-5), source: "PURCHASE" },
 ];
+
+// Sale log: one row per sale (cash, credit, or partial) — the truthful basis for
+// sales counts/totals in reports without double-counting partial sales.
+const saleLog: { at: string; total_minor: number }[] = [];
+// Seed the log from the seeded sale transactions so historic reports are truthful.
+transactions
+  .filter((t) => t.source === "SALE" && t.type === "INCOME")
+  .forEach((t) => saleLog.push({ at: t.occurred_at, total_minor: t.amount.amount_minor }));
 
 function toDebt(row: DebtRow): Debt {
   const outstanding = row.amount_minor - row.settled_minor;
@@ -722,10 +733,12 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
       settled_minor: 0,
       since: new Date().toISOString(),
       due_date: null,
+      source: "SALE",
     };
     debts.push(row);
     receivable = toDebt(row);
   }
+  saleLog.push({ at: new Date().toISOString(), total_minor: total });
   const result: SaleResult = { transaction, receivable, total: formatMoney(total) };
   if (idempotencyKey) saleIdempotency.set(idempotencyKey, result);
   return { result, replay: false };
@@ -883,6 +896,142 @@ export function performance(range: PerfRange): PerformanceResponse {
     change_pct: changePct,
     direction,
   };
+}
+
+// ============================================================
+// MOCK: reports — deterministic, computed from the ledgers. Cash view and
+// booked profit are DIFFERENT truths and both are computed server-side
+// (Phase 3 §6.1): profit includes credit extended and excludes debt
+// collections/payments; the cash view is money actually received/paid.
+// ============================================================
+import type { ReportPeriod, ReportResponse } from "@/shared/api/types";
+
+function reportWindow(period: ReportPeriod): { from: Date; to: Date; label: string } {
+  const now = new Date();
+  const from = new Date(now);
+  let to = new Date(now);
+  if (period === "today") {
+    from.setHours(0, 0, 0, 0);
+  } else if (period === "week") {
+    from.setDate(from.getDate() - 6);
+    from.setHours(0, 0, 0, 0);
+  } else if (period === "month") {
+    from.setDate(1);
+    from.setHours(0, 0, 0, 0);
+  } else {
+    from.setMonth(from.getMonth() - 1, 1);
+    from.setHours(0, 0, 0, 0);
+    to = new Date(now.getFullYear(), now.getMonth(), 1);
+  }
+  const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const end = period === "last_month" ? new Date(to.getTime() - 1) : to;
+  return { from, to, label: `${fmt(from)} – ${fmt(end)}` };
+}
+
+export function report(period: ReportPeriod): ReportResponse {
+  const { from, to, label } = reportWindow(period);
+  const inWindow = (iso: string) => {
+    const ts = new Date(iso).getTime();
+    return ts >= from.getTime() && ts < to.getTime();
+  };
+  const rows = visibleTransactions().filter((t) => inWindow(t.occurred_at));
+
+  const cashIn = rows.filter((t) => t.type === "INCOME").reduce((a, t) => a + t.amount.amount_minor, 0);
+  const cashOut = rows.filter((t) => t.type === "EXPENSE").reduce((a, t) => a + t.amount.amount_minor, 0);
+
+  // Booked view: revenue at the moment of sale (cash + credit extended),
+  // debt collections/payments excluded so nothing is counted twice.
+  const creditExtended = debts
+    .filter((d) => d.kind === "receivable" && d.source === "SALE" && inWindow(d.since))
+    .reduce((a, d) => a + d.amount_minor, 0);
+  const bookedRevenue =
+    rows.filter((t) => t.type === "INCOME" && t.source !== "SETTLEMENT").reduce((a, t) => a + t.amount.amount_minor, 0) +
+    creditExtended;
+  const creditPurchases = debts
+    .filter((d) => d.kind === "payable" && d.source === "PURCHASE" && inWindow(d.since))
+    .reduce((a, d) => a + d.amount_minor, 0);
+  const bookedExpenses =
+    rows.filter((t) => t.type === "EXPENSE" && t.source !== "SETTLEMENT").reduce((a, t) => a + t.amount.amount_minor, 0) +
+    creditPurchases;
+
+  const salesInWindow = saleLog.filter((s) => inWindow(s.at));
+  const salesTotal = salesInWindow.reduce((a, s) => a + s.total_minor, 0);
+
+  // Top products by units sold (SALE movements), revenue estimated at selling price.
+  const units = new Map<string, number>();
+  for (const p of listProducts(true)) {
+    const sold = productMovements(p.id)
+      .filter((m) => m.type === "SALE" && inWindow(m.occurred_at))
+      .reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+    if (sold > 0) units.set(p.id, sold);
+  }
+  const topProducts = [...units.entries()]
+    .map(([pid, sold]) => {
+      const p = listProducts(true).find((x) => x.id === pid)!;
+      return { name: p.name, units: sold, revenue_estimate: formatMoney(sold * p.selling_price.amount_minor) };
+    })
+    .sort((a, b) => b.revenue_estimate.amount_minor - a.revenue_estimate.amount_minor)
+    .slice(0, 5);
+
+  const byCategory = new Map<string, number>();
+  rows
+    .filter((t) => t.type === "EXPENSE")
+    .forEach((t) => byCategory.set(t.category_name, (byCategory.get(t.category_name) ?? 0) + t.amount.amount_minor));
+  const expensesByCategory = [...byCategory.entries()]
+    .map(([name, total]) => ({ name, total: formatMoney(total) }))
+    .sort((a, b) => b.total.amount_minor - a.total.amount_minor);
+
+  return {
+    period,
+    period_label: label,
+    cash: { money_in: formatMoney(cashIn), money_out: formatMoney(cashOut), left_over: formatMoney(cashIn - cashOut) },
+    profit: {
+      booked_revenue: formatMoney(bookedRevenue),
+      booked_expenses: formatMoney(bookedExpenses),
+      profit: formatMoney(bookedRevenue - bookedExpenses),
+      credit_extended: formatMoney(creditExtended),
+    },
+    sales: { count: salesInWindow.length, total: formatMoney(salesTotal), top_products: topProducts },
+    expenses_by_category: expensesByCategory,
+  };
+}
+
+export function reportCsv(period: ReportPeriod): string {
+  const r = report(period);
+  const { from, to } = reportWindow(period);
+  const inWindow = (iso: string) => {
+    const ts = new Date(iso).getTime();
+    return ts >= from.getTime() && ts < to.getTime();
+  };
+  const esc = (s: string) => `"${s.replace(/"/g, '""')}"`;
+  const lines: string[] = [];
+  lines.push(`MI YONE report,${esc(business.name)},${esc(r.period_label)}`);
+  lines.push("");
+  lines.push("Summary,,Amount (Le)");
+  lines.push(`Money in,,${r.cash.money_in.amount_minor / 100}`);
+  lines.push(`Money out,,${r.cash.money_out.amount_minor / 100}`);
+  lines.push(`Left over (cash),,${r.cash.left_over.amount_minor / 100}`);
+  lines.push(`Profit (estimated),,${r.profit.profit.amount_minor / 100}`);
+  lines.push(`Credit extended to customers,,${r.profit.credit_extended.amount_minor / 100}`);
+  lines.push(`Sales count,,${r.sales.count}`);
+  lines.push("");
+  lines.push("Date,Type,Category,Description,Amount (Le),Recorded by");
+  visibleTransactions()
+    .filter((t) => inWindow(t.occurred_at))
+    .sort((a, b) => a.occurred_at.localeCompare(b.occurred_at))
+    .forEach((t) => {
+      lines.push(
+        [
+          t.occurred_at.slice(0, 10),
+          t.type === "INCOME" ? "Money in" : "Money out",
+          esc(t.category_name),
+          esc(t.description ?? ""),
+          String(((t.type === "INCOME" ? 1 : -1) * t.amount.amount_minor) / 100),
+          esc(t.recorded_by),
+        ].join(","),
+      );
+    });
+  return lines.join("\r\n");
 }
 
 export function err(code: ApiErrorBody["code"], message: string): ApiErrorBody {
