@@ -97,10 +97,59 @@ export interface Envelope<T> {
 export interface Product {
   id: string;
   name: string;
-  price: Money;
-  stock: number;
+  unit: string; // "piece", "bag", "kg", …
+  selling_price: Money;
+  cost_price: Money;
+  stock: number; // cached; invariant = Σ movement deltas (server-maintained)
   low_stock_threshold: number;
+  low_stock: boolean; // server-derived
+  stock_value: Money; // stock × cost price — ESTIMATED (label it)
   track_inventory: boolean;
+  archived: boolean;
+}
+
+export type MovementType = "PURCHASE" | "SALE" | "ADJUSTMENT" | "DAMAGE";
+
+export interface StockMovement {
+  id: string;
+  product_id: string;
+  type: MovementType;
+  quantity_delta: number; // signed
+  unit_cost: Money | null;
+  occurred_at: string;
+  recorded_by: string;
+  note: string | null;
+}
+
+export interface CreateProductInput {
+  name: string;
+  unit?: string;
+  selling_price_minor: number;
+  cost_price_minor?: number;
+  low_stock_threshold?: number;
+  initial_stock?: number;
+}
+
+export interface UpdateProductInput {
+  name?: string;
+  unit?: string;
+  selling_price_minor?: number;
+  cost_price_minor?: number;
+  low_stock_threshold?: number;
+  archived?: boolean;
+}
+
+export interface AddStockInput {
+  quantity: number;
+  unit_cost_minor: number;
+  paid: boolean; // false → creates a payable to the supplier
+  supplier_id?: string; // required when paid=false
+}
+
+export interface StockCheckInput {
+  counted: number; // the owner states reality; the server computes the delta
+  reason: "COUNTED" | "DAMAGED" | "OTHER";
+  note?: string;
 }
 
 export interface Customer {

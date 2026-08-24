@@ -353,14 +353,184 @@ export function dashboard(period: "today" | "week" | "month"): DashboardResponse
 // ============================================================
 // MOCK: products, customers, suppliers, receivables, payables, sales
 // ============================================================
-import type { Customer, Debt, Product, Supplier, CreateSaleInput, SaleResult, SettlementResult } from "@/shared/api/types";
+import type { Customer, Debt, Supplier, CreateSaleInput, SaleResult, SettlementResult } from "@/shared/api/types";
 
-export const products: Product[] = [
-  { id: "p-101", name: "Rice (50kg bag)", price: formatMoney(85_000_00), stock: 12, low_stock_threshold: 5, track_inventory: true },
-  { id: "p-102", name: "Cooking oil (5L)", price: formatMoney(30_000_00), stock: 3, low_stock_threshold: 5, track_inventory: true },
-  { id: "p-103", name: "Sugar (1kg)", price: formatMoney(4_500_00), stock: 40, low_stock_threshold: 10, track_inventory: true },
-  { id: "p-104", name: "Soap (bar)", price: formatMoney(1_500_00), stock: 58, low_stock_threshold: 12, track_inventory: true },
+// Products: raw rows + an APPEND-ONLY movement ledger. Stock is never a naked
+// editable number — it is the sum of movement deltas (Phase 2 §10).
+import type {
+  AddStockInput,
+  MovementType,
+  Product,
+  StockCheckInput,
+  StockMovement,
+  UpdateProductInput,
+} from "@/shared/api/types";
+
+interface ProductRow {
+  id: string;
+  name: string;
+  unit: string;
+  selling_minor: number;
+  cost_minor: number;
+  threshold: number;
+  track: boolean;
+  archived: boolean;
+}
+
+const productRows: ProductRow[] = [
+  { id: "p-101", name: "Rice (50kg bag)", unit: "bag", selling_minor: 85_000_00, cost_minor: 70_000_00, threshold: 5, track: true, archived: false },
+  { id: "p-102", name: "Cooking oil (5L)", unit: "piece", selling_minor: 30_000_00, cost_minor: 24_000_00, threshold: 5, track: true, archived: false },
+  { id: "p-103", name: "Sugar (1kg)", unit: "kg", selling_minor: 4_500_00, cost_minor: 3_600_00, threshold: 10, track: true, archived: false },
+  { id: "p-104", name: "Soap (bar)", unit: "piece", selling_minor: 1_500_00, cost_minor: 1_000_00, threshold: 12, track: true, archived: false },
 ];
+
+const movements: StockMovement[] = [];
+
+function addMovement(
+  productId: string,
+  type: MovementType,
+  quantityDelta: number,
+  unitCostMinor: number | null,
+  note: string | null = null,
+  occurredAt: string = new Date().toISOString(),
+): StockMovement {
+  const m: StockMovement = {
+    id: id("mv"),
+    product_id: productId,
+    type,
+    quantity_delta: quantityDelta,
+    unit_cost: unitCostMinor === null ? null : formatMoney(unitCostMinor),
+    occurred_at: occurredAt,
+    recorded_by: MOCK_USER,
+    note,
+  };
+  movements.push(m);
+  return m;
+}
+
+// Seed opening stock as PURCHASE movements (the ledger is the source of truth).
+addMovement("p-101", "PURCHASE", 12, 70_000_00, null, daysAgo(20, 8));
+addMovement("p-102", "PURCHASE", 5, 24_000_00, null, daysAgo(15, 8));
+addMovement("p-102", "SALE", -2, null, null, daysAgo(3, 12));
+addMovement("p-103", "PURCHASE", 40, 3_600_00, null, daysAgo(10, 8));
+addMovement("p-104", "PURCHASE", 60, 1_000_00, null, daysAgo(25, 8));
+addMovement("p-104", "SALE", -2, null, null, daysAgo(2, 15));
+
+export function stockOf(productId: string): number {
+  return movements.filter((m) => m.product_id === productId).reduce((a, m) => a + m.quantity_delta, 0);
+}
+
+export function toProduct(row: ProductRow): Product {
+  const stock = row.track ? stockOf(row.id) : 0;
+  return {
+    id: row.id,
+    name: row.name,
+    unit: row.unit,
+    selling_price: formatMoney(row.selling_minor),
+    cost_price: formatMoney(row.cost_minor),
+    stock,
+    low_stock_threshold: row.threshold,
+    low_stock: row.track && stock <= row.threshold,
+    stock_value: formatMoney(Math.max(0, stock) * row.cost_minor), // estimated (latest cost, Phase 2 §7.1)
+    track_inventory: row.track,
+    archived: row.archived,
+  };
+}
+
+export function listProducts(includeArchived = false): Product[] {
+  return productRows
+    .filter((r) => includeArchived || !r.archived)
+    .map(toProduct)
+    .sort((a, b) => Number(b.low_stock) - Number(a.low_stock) || a.name.localeCompare(b.name));
+}
+
+export function getProductRow(idOrNull: string | undefined | null): ProductRow | undefined {
+  return productRows.find((r) => r.id === idOrNull);
+}
+
+export function productMovements(productId: string): StockMovement[] {
+  return movements.filter((m) => m.product_id === productId).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
+}
+
+export function createProduct(input: {
+  name: string;
+  unit?: string;
+  selling_price_minor: number;
+  cost_price_minor?: number;
+  low_stock_threshold?: number;
+  initial_stock?: number;
+}): Product {
+  const row: ProductRow = {
+    id: id("p"),
+    name: input.name.trim(),
+    unit: input.unit?.trim() || "piece",
+    selling_minor: input.selling_price_minor,
+    cost_minor: input.cost_price_minor ?? 0,
+    threshold: input.low_stock_threshold ?? 5,
+    track: true,
+    archived: false,
+  };
+  productRows.push(row);
+  if (input.initial_stock && input.initial_stock > 0) {
+    addMovement(row.id, "PURCHASE", input.initial_stock, row.cost_minor || null, "Opening stock");
+  }
+  return toProduct(row);
+}
+
+export function updateProduct(productId: string, input: UpdateProductInput): Product | null {
+  const row = productRows.find((r) => r.id === productId);
+  if (!row) return null;
+  if (input.name !== undefined) row.name = input.name.trim() || row.name;
+  if (input.unit !== undefined) row.unit = input.unit.trim() || row.unit;
+  if (input.selling_price_minor !== undefined) row.selling_minor = input.selling_price_minor;
+  if (input.cost_price_minor !== undefined) row.cost_minor = input.cost_price_minor;
+  if (input.low_stock_threshold !== undefined) row.threshold = input.low_stock_threshold;
+  if (input.archived !== undefined) row.archived = input.archived;
+  return toProduct(row);
+}
+
+// Add stock = one action: PURCHASE movement + EXPENSE transaction + optional payable.
+export function addStock(productId: string, input: AddStockInput): { product: Product; movement: StockMovement } | null {
+  const row = productRows.find((r) => r.id === productId && !r.archived);
+  if (!row || input.quantity <= 0 || input.unit_cost_minor < 0) return null;
+  if (!input.paid && !input.supplier_id) return null;
+  row.cost_minor = input.unit_cost_minor || row.cost_minor; // latest-cost model
+  const movement = addMovement(productId, "PURCHASE", input.quantity, input.unit_cost_minor);
+  const totalMinor = input.quantity * input.unit_cost_minor;
+  if (totalMinor > 0) {
+    if (input.paid) {
+      createTransaction(
+        { type: "EXPENSE", amount_minor: totalMinor, category_id: "cat-ex-stock", description: `${row.name} × ${input.quantity}`, source: "MANUAL" },
+        null,
+      );
+    } else {
+      const supplier = suppliers.find((s) => s.id === input.supplier_id);
+      debts.push({
+        id: id("pay"),
+        kind: "payable",
+        counterparty_id: input.supplier_id!,
+        counterparty_name: supplier?.name ?? "Supplier",
+        amount_minor: totalMinor,
+        settled_minor: 0,
+        since: new Date().toISOString(),
+        due_date: null,
+      });
+    }
+  }
+  return { product: toProduct(row), movement };
+}
+
+// Stock check: the owner states reality; the server computes the delta.
+export function stockCheck(productId: string, input: StockCheckInput): { product: Product; movement: StockMovement | null } | null {
+  const row = productRows.find((r) => r.id === productId && !r.archived);
+  if (!row || input.counted < 0) return null;
+  const delta = input.counted - stockOf(productId);
+  if (delta === 0) return { product: toProduct(row), movement: null };
+  const type: MovementType = input.reason === "DAMAGED" ? "DAMAGE" : "ADJUSTMENT";
+  const note = input.note ?? (input.reason === "DAMAGED" ? "damaged" : input.reason === "COUNTED" ? "counted" : "other");
+  const movement = addMovement(productId, type, delta, null, note);
+  return { product: toProduct(row), movement };
+}
 
 export const customers: Customer[] = [
   { id: "c-201", name: "Aminata", phone: "+232 76 000001" },
@@ -428,8 +598,12 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
   if (total <= 0 || paid < 0) return null;
   if (credit > 0 && !input.customer_id) return null;
 
-  const product = input.product_id ? products.find((p) => p.id === input.product_id) : undefined;
-  if (product && product.track_inventory) product.stock = Math.max(0, product.stock - (input.quantity ?? 1));
+  // Stock leaves via a SALE movement on the ledger (never a naked decrement).
+  // Negative stock is allowed with a warning surface, not blocked (Phase 2 §10).
+  const product = getProductRow(input.product_id);
+  if (product && product.track) {
+    addMovement(product.id, "SALE", -(input.quantity ?? 1), null);
+  }
 
   let transaction = null;
   if (paid > 0) {
@@ -482,7 +656,7 @@ export function settleDebt(debtId: string, amountMinor: number): SettlementResul
 
 export function attentionItems(): AttentionItem[] {
   const items: AttentionItem[] = [];
-  const low = products.filter((p) => p.track_inventory && p.stock <= p.low_stock_threshold);
+  const low = listProducts().filter((p) => p.low_stock);
   if (low.length > 0) {
     items.push({
       id: "att-low-stock",

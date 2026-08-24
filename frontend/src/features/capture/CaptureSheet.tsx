@@ -103,7 +103,7 @@ export function CaptureSheet({
     setProductId(id);
     setQuantity(qty);
     const product = products.data?.find((p) => p.id === id);
-    if (product) setAmount(fromMinor(product.price.amount_minor * qty));
+    if (product) setAmount(fromMinor(product.selling_price.amount_minor * qty));
   }
 
   const submit = useCallback(async () => {
@@ -245,7 +245,7 @@ export function CaptureSheet({
             <div>
               <ChipPicker
                 label={t("capture.product")}
-                options={(products.data ?? []).map((p) => ({ id: p.id, label: p.name, sublabel: p.price.display }))}
+                options={(products.data ?? []).map((p) => ({ id: p.id, label: p.name, sublabel: p.selling_price.display }))}
                 selectedId={productId}
                 onSelect={(id) => applyProduct(id, 1)}
               />
