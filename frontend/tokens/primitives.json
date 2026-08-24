@@ -7,6 +7,7 @@
     "amber":  { "700": "#8A5B00", "100": "#FBEED3" },
     "red":    { "600": "#B3261E", "100": "#FBE7E5" },
     "slate":  { "600": "#3D5A80", "100": "#E4EAF2" },
+    "chartblue": { "600": "#2F5FA3" },
     "white":  { "0": "#FFFFFF" },
     "border": { "hairline": "#E6DFD4", "input": "#C9BFB0" }
   },

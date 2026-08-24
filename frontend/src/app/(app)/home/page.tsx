@@ -8,6 +8,7 @@ import { api } from "@/shared/api/client";
 import type { DashboardResponse } from "@/shared/api/types";
 import { BUSINESS_ID } from "@/shared/api/session";
 import { HealthHeader, type Period } from "@/features/home/HealthHeader";
+import { PerformanceChart } from "@/features/home/PerformanceChart";
 import { useCapture } from "@/features/shell/AppShell";
 import { EmptyState } from "@/shared/design-system/EmptyState";
 import { SkeletonList } from "@/shared/design-system/SkeletonList";
@@ -72,6 +73,10 @@ export default function HomePage() {
         pendingCount={pendingCount}
         stale={query.isPlaceholderData}
       />
+
+      {/* Performance over time (owner-approved amendment to Phase 4 §17).
+          Self-hides when the ledger is empty — no wall of zeros for a new business. */}
+      <PerformanceChart />
 
       {/* Needs attention (max 4 rows, one tap from the fix — Phase 4 §13) */}
       {data.attention.length === 0 ? (

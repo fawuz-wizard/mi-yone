@@ -31,6 +31,9 @@ const config: Config = {
         info: "var(--color-status-info)",
         "info-fill": "var(--color-status-info-fill)",
         "focus-ring": "var(--color-focus-ring)",
+        "series-income": "var(--color-series-income)",
+        "series-expenses": "var(--color-series-expenses)",
+        "series-net": "var(--color-series-net)",
       },
       borderRadius: {
         input: "var(--radius-input)",

@@ -51,7 +51,46 @@ function daysAgo(n: number, hour = 10): string {
   return d.toISOString();
 }
 
+// Deterministic historical seed (demo business, ~12 months) so time-range analytics
+// have real ledger rows to compute from. Pattern-based, no randomness (resume-safe).
+function wholeLe(minor: number): number {
+  return Math.round(minor / 100) * 100; // shops deal in whole leones
+}
+
+function seedHistory(): Transaction[] {
+  const rows: Transaction[] = [];
+  // Older history: weekly sales with gentle growth + stock/transport/rent.
+  for (let week = 52; week >= 5; week -= 1) {
+    const growth = 1 + (52 - week) * 0.012; // ~+60% across the year
+    const wobble = week % 4 === 0 ? 0.82 : week % 3 === 0 ? 1.12 : 1.0;
+    const salesMinor = wholeLe(9_000_000 * growth * wobble); // ≈ Le 90,000/wk base
+    rows.push(mk("INCOME", salesMinor, "Sales", daysAgo(week * 7, 11), "SALE"));
+    if (week % 2 === 0) {
+      rows.push(mk("EXPENSE", wholeLe(salesMinor * 0.42), "Stock purchase", daysAgo(week * 7 - 1, 8), "MANUAL"));
+    }
+    if (week % 4 === 1) {
+      rows.push(mk("EXPENSE", 1_800_000, "Transport", daysAgo(week * 7 - 2, 7), "MANUAL"));
+    }
+  }
+  // Recent month: daily sales (what a real shop's ledger looks like at 30d/7d zoom).
+  for (let day = 34; day >= 1; day -= 1) {
+    const wobble = day % 7 === 0 ? 0.6 : day % 5 === 0 ? 1.35 : day % 3 === 0 ? 1.1 : 0.9;
+    rows.push(mk("INCOME", wholeLe(1_600_000 * wobble), "Sales", daysAgo(day, 10 + (day % 6)), "SALE"));
+    if (day % 4 === 0) {
+      rows.push(mk("EXPENSE", wholeLe(2_400_000 * (day % 8 === 0 ? 1.5 : 1)), "Stock purchase", daysAgo(day, 8), "MANUAL"));
+    }
+    if (day % 9 === 0) {
+      rows.push(mk("EXPENSE", 900_000, "Transport", daysAgo(day, 7), "MANUAL"));
+    }
+  }
+  for (let month = 12; month >= 1; month -= 1) {
+    rows.push(mk("EXPENSE", 5_000_000, "Rent", daysAgo(month * 30, 9), "MANUAL"));
+  }
+  return rows;
+}
+
 export const transactions: Transaction[] = [
+  ...seedHistory(),
   mk("INCOME", 4500000, "Sales", daysAgo(0, 9), "SALE"),
   mk("INCOME", 12000000, "Sales", daysAgo(1, 12), "SALE"),
   mk("EXPENSE", 3500000, "Stock purchase", daysAgo(1, 8), "MANUAL", "Rice, 2 bags"),
@@ -431,6 +470,102 @@ export function attentionItems(): AttentionItem[] {
     });
   }
   return items;
+}
+
+// ============================================================
+// MOCK: performance analytics — deterministic, computed from the transaction
+// ledger (never hardcoded series). Percentage change vs the previous
+// equal-length window is computed HERE, server-side (Phase 2 rule: the backend
+// owns growth-rate math; the client only displays it).
+// ============================================================
+import type { PerfBucket, PerfRange, PerformanceResponse } from "@/shared/api/types";
+
+const RANGE_DEF: Record<PerfRange, { unit: "day" | "week" | "month"; count: number }> = {
+  "7d": { unit: "day", count: 7 },
+  "30d": { unit: "day", count: 30 },
+  "3m": { unit: "week", count: 13 },
+  "6m": { unit: "month", count: 6 },
+  "1y": { unit: "month", count: 12 },
+};
+
+function bucketStarts(unit: "day" | "week" | "month", count: number, endAnchor: Date): Date[] {
+  const starts: Date[] = [];
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const d = new Date(endAnchor);
+    if (unit === "day") {
+      d.setDate(d.getDate() - i);
+      d.setHours(0, 0, 0, 0);
+    } else if (unit === "week") {
+      d.setDate(d.getDate() - i * 7);
+      d.setHours(0, 0, 0, 0);
+    } else {
+      d.setMonth(d.getMonth() - i, 1);
+      d.setHours(0, 0, 0, 0);
+    }
+    starts.push(d);
+  }
+  return starts;
+}
+
+function sumWindow(fromMs: number, toMs: number): { income: number; expenses: number } {
+  let income = 0;
+  let expenses = 0;
+  for (const t of visibleTransactions()) {
+    const ts = new Date(t.occurred_at).getTime();
+    if (ts >= fromMs && ts < toMs) {
+      if (t.type === "INCOME") income += t.amount.amount_minor;
+      else expenses += t.amount.amount_minor;
+    }
+  }
+  return { income, expenses };
+}
+
+export function performance(range: PerfRange): PerformanceResponse {
+  const def = RANGE_DEF[range];
+  const now = new Date();
+  const starts = bucketStarts(def.unit, def.count, now);
+  const ends = [...starts.slice(1).map((d) => d.getTime()), now.getTime() + 1];
+
+  const buckets: PerfBucket[] = starts.map((start, i) => {
+    const { income, expenses } = sumWindow(start.getTime(), ends[i]);
+    const label =
+      def.unit === "month"
+        ? start.toLocaleDateString("en-GB", { month: "short" })
+        : start.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    return { label, income: formatMoney(income), expenses: formatMoney(expenses), net: formatMoney(income - expenses) };
+  });
+
+  const windowStart = starts[0].getTime();
+  const windowEnd = now.getTime() + 1;
+  const windowLen = windowEnd - windowStart;
+  const cur = sumWindow(windowStart, windowEnd);
+  const prev = sumWindow(windowStart - windowLen, windowStart);
+  const curNet = cur.income - cur.expenses;
+  const prevNet = prev.income - prev.expenses;
+
+  // Zero/near-zero-base guard (Phase 2 §9 spirit): a percentage against a
+  // negligible base is meaningless — return null rather than a silly number.
+  let changePct: string | null = null;
+  if (prevNet !== 0) {
+    const pct = ((curNet - prevNet) / Math.abs(prevNet)) * 100;
+    if (Math.abs(pct) <= 500) {
+      changePct = `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}`;
+    }
+  }
+  const direction = curNet > prevNet ? "up" : curNet < prevNet ? "down" : "flat";
+
+  return {
+    range,
+    buckets,
+    totals: {
+      income: formatMoney(cur.income),
+      expenses: formatMoney(cur.expenses),
+      net: formatMoney(curNet),
+    },
+    previous_net: formatMoney(prevNet),
+    change_pct: changePct,
+    direction,
+  };
 }
 
 export function err(code: ApiErrorBody["code"], message: string): ApiErrorBody {

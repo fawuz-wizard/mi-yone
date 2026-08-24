@@ -26,6 +26,9 @@
   --color-status-info: #3D5A80;
   --color-status-info-fill: #E4EAF2;
   --color-focus-ring: #3D5A80;
+  --color-series-income: #1B7A4B;
+  --color-series-expenses: #2F5FA3;
+  --color-series-net: #9A4520;
   --color-scrim: rgba(31,25,18,0.4);
   --radius-input: 10px;
   --radius-card: 14px;

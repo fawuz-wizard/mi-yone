@@ -149,6 +149,23 @@
   "menu.placeholderTitle": "Customers, suppliers, insights and settings.",
   "menu.placeholderBody": "This section arrives in the next milestone of this build.",
 
+  "perf.title": "Performance",
+  "perf.rangeLabel": "Time range",
+  "perf.range7d": "7D",
+  "perf.range30d": "30D",
+  "perf.range3m": "3M",
+  "perf.range6m": "6M",
+  "perf.range1y": "1Y",
+  "perf.progression": "↑ {pct}% Progression",
+  "perf.regression": "↓ {pct}% Regression",
+  "perf.flat": "No change vs previous period",
+  "perf.vsPrevious": "vs previous period",
+  "perf.income": "Money in",
+  "perf.expenses": "Money out",
+  "perf.net": "Left over",
+  "perf.chartAria": "Performance chart: money in, money out and left over by period. Use arrow keys to read values.",
+  "perf.tableCaption": "Performance by period",
+
   "partner.fromRecords": "From your records",
   "partner.fromWeb": "From the web · {source} · {date}",
 

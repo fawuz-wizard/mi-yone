@@ -153,6 +153,24 @@ export interface SettlementResult {
   transaction: Transaction;
 }
 
+export type PerfRange = "7d" | "30d" | "3m" | "6m" | "1y";
+
+export interface PerfBucket {
+  label: string; // server-formatted period label ("24 Aug", "Aug", …)
+  income: Money;
+  expenses: Money;
+  net: Money;
+}
+
+export interface PerformanceResponse {
+  range: PerfRange;
+  buckets: PerfBucket[];
+  totals: { income: Money; expenses: Money; net: Money };
+  previous_net: Money; // net of the previous equal-length window
+  change_pct: string | null; // server-computed, signed, 1dp ("+12.5"); null when undefined
+  direction: "up" | "down" | "flat";
+}
+
 export interface CreateTransactionInput {
   type: TransactionType;
   amount_minor: number;
