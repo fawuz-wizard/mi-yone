@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 
 def ok(data: Any, status_code: int = 200) -> JSONResponse:
@@ -33,6 +34,12 @@ def install_handlers(app):
     @app.exception_handler(RequestValidationError)
     async def validation_handler(_: Request, __: RequestValidationError):
         return fail(422, "VALIDATION_ERROR", "Some of the information is invalid.")
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_handler(_: Request, __: IntegrityError):
+        # A database constraint said no (e.g. concurrent duplicate, over-settlement):
+        # structured conflict, never a raw driver error.
+        return fail(409, "CONFLICT", "That change conflicts with existing records.")
 
     @app.exception_handler(Exception)
     async def unexpected_handler(_: Request, __: Exception):

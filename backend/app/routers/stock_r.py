@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..common.ids import gen_id
 from ..core.db import get_db
-from ..core.deps import TenantContext, tenant
+from ..core.deps import TenantContext, tenant, tenant_admin
 from ..core.envelope import ApiError, ok
 from ..models import Product, StockMovement
 from ..serializers import movement_json, product_json
@@ -16,34 +16,34 @@ router = APIRouter(prefix="/businesses/{bid}/products", tags=["stock"])
 
 
 class CreateProductInput(BaseModel):
-    name: str
-    unit: str | None = None
-    selling_price_minor: int
-    cost_price_minor: int | None = None
-    low_stock_threshold: int | None = None
-    initial_stock: int | None = None
+    name: str = Field(min_length=1, max_length=120)
+    unit: str | None = Field(default=None, max_length=24)
+    selling_price_minor: int = Field(ge=1, le=100_000_000_000)
+    cost_price_minor: int | None = Field(default=None, ge=0, le=100_000_000_000)
+    low_stock_threshold: int | None = Field(default=None, ge=0, le=1_000_000)
+    initial_stock: int | None = Field(default=None, ge=0, le=1_000_000)
 
 
 class UpdateProductInput(BaseModel):
-    name: str | None = None
-    unit: str | None = None
-    selling_price_minor: int | None = None
-    cost_price_minor: int | None = None
-    low_stock_threshold: int | None = None
+    name: str | None = Field(default=None, max_length=120)
+    unit: str | None = Field(default=None, max_length=24)
+    selling_price_minor: int | None = Field(default=None, ge=1, le=100_000_000_000)
+    cost_price_minor: int | None = Field(default=None, ge=0, le=100_000_000_000)
+    low_stock_threshold: int | None = Field(default=None, ge=0, le=1_000_000)
     archived: bool | None = None
 
 
 class AddStockInput(BaseModel):
-    quantity: int
-    unit_cost_minor: int
+    quantity: int = Field(ge=1, le=1_000_000)
+    unit_cost_minor: int = Field(ge=0, le=100_000_000_000)
     paid: bool
-    supplier_id: str | None = None
+    supplier_id: str | None = Field(default=None, max_length=40)
 
 
 class StockCheckInput(BaseModel):
-    counted: int
-    reason: str
-    note: str | None = None
+    counted: int = Field(ge=0, le=1_000_000)
+    reason: str = Field(pattern="^(COUNTED|DAMAGED|OTHER)$")
+    note: str | None = Field(default=None, max_length=200)
 
 
 @router.get("")
@@ -54,7 +54,7 @@ def list_products(ctx: TenantContext = Depends(tenant), db: Session = Depends(ge
 
 
 @router.post("")
-def create_product(body: CreateProductInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+def create_product(body: CreateProductInput, ctx: TenantContext = Depends(tenant_admin), db: Session = Depends(get_db)):
     if not body.name.strip() or body.selling_price_minor <= 0:
         raise ApiError(422, "VALIDATION_ERROR", "A name and selling price are needed.")
     p = Product(
@@ -89,7 +89,7 @@ def product_detail(product_id: str, ctx: TenantContext = Depends(tenant), db: Se
 
 
 @router.patch("/{product_id}")
-def update_product(product_id: str, body: UpdateProductInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+def update_product(product_id: str, body: UpdateProductInput, ctx: TenantContext = Depends(tenant_admin), db: Session = Depends(get_db)):
     p = inventory.get_product(db, ctx.business.id, product_id)
     if body.name is not None and body.name.strip():
         p.name = body.name.strip()

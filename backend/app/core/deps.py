@@ -64,3 +64,22 @@ def tenant(bid: str, user: User = Depends(current_user), db: Session = Depends(g
     if business is None or business.status != "ACTIVE":
         raise ApiError(404, "TENANT_NOT_FOUND", "Business not found.")
     return TenantContext(user=user, business=business, membership=membership)
+
+
+# Role hierarchy (Phase 2/4 §6): OWNER > ADMIN > STAFF. STAFF records and views;
+# corrections/reversals and product/party management require ADMIN+. Enforcement
+# is BACKEND-ONLY — UI role-hiding is never a security boundary.
+_ROLE_RANK = {"STAFF": 0, "ADMIN": 1, "OWNER": 2}
+
+
+def require_role(min_role: str):
+    def dependency(ctx: TenantContext = Depends(tenant)) -> TenantContext:
+        if _ROLE_RANK.get(ctx.membership.role, -1) < _ROLE_RANK[min_role]:
+            raise ApiError(403, "PERMISSION_DENIED", "You don't have permission to do this.")
+        return ctx
+
+    return dependency
+
+
+tenant_admin = require_role("ADMIN")
+tenant_owner = require_role("OWNER")

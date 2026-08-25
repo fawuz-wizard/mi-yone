@@ -1,12 +1,12 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.db import get_db
-from ..core.deps import TenantContext, tenant
+from ..core.deps import TenantContext, tenant, tenant_admin
 from ..core.envelope import ApiError, ok
 from ..models import Category, Transaction
 from ..serializers import tx_json
@@ -24,20 +24,20 @@ def list_categories(kind: str | None = None, ctx: TenantContext = Depends(tenant
 
 
 class CreateTransactionInput(BaseModel):
-    type: str
-    amount_minor: int
-    category_id: str | None = None
-    description: str | None = None
-    occurred_at: str | None = None
-    source: str = "MANUAL"
+    type: str = Field(pattern="^(INCOME|EXPENSE)$")
+    amount_minor: int = Field(ge=1, le=100_000_000_000)
+    category_id: str | None = Field(default=None, max_length=40)
+    description: str | None = Field(default=None, max_length=500)
+    occurred_at: str | None = Field(default=None, max_length=40)
+    source: str = Field(default="MANUAL", pattern="^(MANUAL|SALE)$")
 
 
 class FixInput(BaseModel):
-    amount_minor: int | None = None
-    category_id: str | None = None
-    description: str | None = None
-    occurred_at: str | None = None
-    reason: str = "correction"
+    amount_minor: int | None = Field(default=None, ge=1, le=100_000_000_000)
+    category_id: str | None = Field(default=None, max_length=40)
+    description: str | None = Field(default=None, max_length=500)
+    occurred_at: str | None = Field(default=None, max_length=40)
+    reason: str = Field(default="correction", max_length=200)
 
 
 @router.get("/transactions")
@@ -65,17 +65,15 @@ def list_transactions(
 @router.post("/transactions")
 def create_transaction(
     body: CreateTransactionInput,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=80),
     ctx: TenantContext = Depends(tenant),
     db: Session = Depends(get_db),
 ):
-    if body.type not in ("INCOME", "EXPENSE"):
-        raise ApiError(422, "VALIDATION_ERROR", "The record is invalid.")
     t, replay = finance.create_transaction(
         db, ctx.business.id, ctx.user.full_name,
         type_=body.type, amount_minor=body.amount_minor, category_id=body.category_id,
         description=body.description, occurred_at=body.occurred_at,
-        source=body.source if body.source in ("MANUAL", "SALE") else "MANUAL",
+        source=body.source,
         idempotency_key=idempotency_key,
     )
     return ok(tx_json(t), status_code=200 if replay else 201)
@@ -90,7 +88,7 @@ def get_transaction(tx_id: str, ctx: TenantContext = Depends(tenant), db: Sessio
 
 
 @router.post("/transactions/{tx_id}/fix")
-def fix_transaction(tx_id: str, body: FixInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+def fix_transaction(tx_id: str, body: FixInput, ctx: TenantContext = Depends(tenant_admin), db: Session = Depends(get_db)):
     corrected = finance.fix_transaction(
         db, ctx.business.id, ctx.user.full_name, tx_id,
         amount_minor=body.amount_minor, category_id=body.category_id,
@@ -100,6 +98,6 @@ def fix_transaction(tx_id: str, body: FixInput, ctx: TenantContext = Depends(ten
 
 
 @router.post("/transactions/{tx_id}/reverse")
-def reverse_transaction(tx_id: str, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+def reverse_transaction(tx_id: str, ctx: TenantContext = Depends(tenant_admin), db: Session = Depends(get_db)):
     finance.reverse_transaction(db, ctx.business.id, ctx.user.full_name, tx_id)
     return ok({"reversed": True})

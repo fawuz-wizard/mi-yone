@@ -290,5 +290,7 @@
 
   "error.generic": "Something didn't work. Your information is still here.",
   "error.network": "We couldn't reach the network. Your information is still here.",
-  "error.auth": "Please sign in again to keep your records safe."
+  "error.auth": "Please sign in again to keep your records safe.",
+  "error.permission": "You don't have permission to do this. Ask the business owner.",
+  "error.rateLimited": "Too many attempts. Please wait a moment and try again."
 }

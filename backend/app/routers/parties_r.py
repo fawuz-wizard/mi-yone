@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..common.ids import gen_id
 from ..core.db import get_db
-from ..core.deps import TenantContext, tenant
+from ..core.deps import TenantContext, tenant, tenant_admin
 from ..core.envelope import ApiError, ok
 from ..models import Debt, Party, Transaction
 from ..serializers import debt_json, party_json, tx_json
@@ -15,14 +15,14 @@ router = APIRouter(prefix="/businesses/{bid}", tags=["parties"])
 
 
 class CreatePartyInput(BaseModel):
-    name: str
-    phone: str | None = None
+    name: str = Field(min_length=1, max_length=120)
+    phone: str | None = Field(default=None, max_length=40)
 
 
 class UpdatePartyInput(BaseModel):
-    name: str | None = None
-    phone: str | None = None
-    notes: str | None = None
+    name: str | None = Field(default=None, max_length=120)
+    phone: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=2000)
     archived: bool | None = None
 
 
@@ -102,7 +102,9 @@ for path_kind in ("customers", "suppliers"):
             return _detail(db, ctx, kind, party_id)
 
         @router.patch(f"/{path_kind}/{{party_id}}")
-        def update_party(party_id: str, body: UpdatePartyInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+        def update_party(party_id: str, body: UpdatePartyInput, ctx: TenantContext = Depends(tenant_admin), db: Session = Depends(get_db)):
+            # Edit/archive of people records is management → ADMIN+ (creation stays
+            # STAFF: adding a customer mid-sale is recording, not management).
             return _update(db, ctx, kind, party_id, body)
 
     make_routes(path_kind, kind)

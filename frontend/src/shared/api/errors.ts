@@ -2,7 +2,7 @@
 // Components never see HTTP; they see DomainError.kind and a catalog message id.
 import type { ApiErrorBody } from "./types";
 
-export type DomainErrorKind = "network" | "auth" | "validation" | "not_found" | "conflict" | "server";
+export type DomainErrorKind = "network" | "auth" | "forbidden" | "validation" | "not_found" | "conflict" | "server";
 
 export class DomainError extends Error {
   kind: DomainErrorKind;
@@ -22,6 +22,10 @@ export function mapApiError(status: number, body: ApiErrorBody | undefined): Dom
     case "AUTH_REQUIRED":
     case "AUTH_INVALID":
       return new DomainError("auth", "error.auth", rid);
+    case "PERMISSION_DENIED":
+      return new DomainError("forbidden", "error.permission", rid);
+    case "RATE_LIMITED":
+      return new DomainError("server", "error.rateLimited", rid);
     case "VALIDATION_ERROR":
       return new DomainError("validation", "capture.saveFailed", rid);
     case "TENANT_NOT_FOUND":

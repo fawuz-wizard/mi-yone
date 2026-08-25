@@ -1,7 +1,9 @@
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from ..core import ratelimit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,15 +21,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginInput(BaseModel):
-    identifier: str = ""
-    password: str = ""
+    identifier: str = Field(default="", max_length=255)
+    password: str = Field(default="", max_length=200)
 
 
 class RegisterInput(BaseModel):
-    name: str
-    identifier: str
-    password: str
-    business_name: str | None = None
+    name: str = Field(min_length=1, max_length=120)
+    identifier: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=10, max_length=200)
+    business_name: str | None = Field(default=None, max_length=120)
 
 
 def _first_business(db: Session, user: User) -> Business | None:
@@ -65,13 +67,23 @@ def _start_session(db: Session, response, user: User) -> None:
 
 
 @router.post("/login")
-def login(body: LoginInput, db: Session = Depends(get_db)):
+def login(body: LoginInput, request: Request, db: Session = Depends(get_db)):
     identifier = body.identifier.strip().lower()
+    ip = request.client.host if request.client else "?"
+    # Rate limits BEFORE verification. Per-IP is generous (60/min) because many
+    # legitimate users share carrier-NAT IPs; the per-identifier failure limit
+    # (5 failures / 5 min) is the real credential-stuffing guard.
+    if not ratelimit.allow(f"login-ip:{ip}", 60, 60) or not ratelimit.allow(f"login-id:{identifier}", 5, 300):
+        audit(db, None, identifier or "?", "auth.rate_limited")
+        raise ApiError(429, "RATE_LIMITED", "Too many attempts. Please wait a moment and try again.")
+    ratelimit.record(f"login-ip:{ip}")
     user = db.scalar(select(User).where(User.email == identifier))
     # Uniform failure — no user enumeration (Phase 2 §17).
     if user is None or not verify_password(user.password_hash, body.password):
+        ratelimit.record(f"login-id:{identifier}")
         audit(db, None, identifier or "?", "auth.login_failed")
         raise ApiError(401, "AUTH_INVALID", "We couldn't sign you in. Check your details and try again.")
+    ratelimit.reset(f"login-id:{identifier}")
     business = _first_business(db, user)
     if business is None:
         raise ApiError(401, "AUTH_INVALID", "We couldn't sign you in. Check your details and try again.")

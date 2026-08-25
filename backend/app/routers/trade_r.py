@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,23 +15,23 @@ router = APIRouter(prefix="/businesses/{bid}", tags=["trade"])
 
 
 class CreateSaleInput(BaseModel):
-    amount_minor: int
-    product_id: str | None = None
-    quantity: int | None = None
-    payment: str = "PAID"
-    amount_paid_minor: int | None = None
-    customer_id: str | None = None
-    description: str | None = None
+    amount_minor: int = Field(ge=1, le=100_000_000_000)
+    product_id: str | None = Field(default=None, max_length=40)
+    quantity: int | None = Field(default=None, ge=1, le=1_000_000)
+    payment: str = Field(default="PAID", pattern="^(PAID|CREDIT|PARTIAL)$")
+    amount_paid_minor: int | None = Field(default=None, ge=0, le=100_000_000_000)
+    customer_id: str | None = Field(default=None, max_length=40)
+    description: str | None = Field(default=None, max_length=500)
 
 
 class CreateDebtInput(BaseModel):
-    counterparty_id: str
-    amount_minor: int
-    note: str | None = None
+    counterparty_id: str = Field(max_length=40)
+    amount_minor: int = Field(ge=1, le=100_000_000_000)
+    note: str | None = Field(default=None, max_length=500)
 
 
 class SettlementInput(BaseModel):
-    amount_minor: int
+    amount_minor: int = Field(ge=1, le=100_000_000_000)
 
 
 @router.post("/sales")
