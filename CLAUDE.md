@@ -44,15 +44,26 @@ contract. Phase 4 (design spec) is law for all UI work; Phase 2 for architecture
 12. **Verify before done:** `npm run typecheck && npm test && npm run build`,
     plus `npm run e2e` for flows. Feature-by-feature commits, meaningful messages.
 
-## Current state (Phase 5, milestone 2)
+## Current state (Phase 5, milestone 8 — REAL BACKEND EXISTS)
 
-Done: tokens, design system (Phase 4 §13 inventory), app shell (bottom nav /
-sidebar), auth door (mock), Home (health/attention/insight/quick actions),
-Money (5 tabs incl. Owed to you / You owe), full capture engine (sale
-paid/credit/partial, expense, debt payments), fix-with-history, offline capture
-queue boundary (in-memory — durable queue is GATED on an approved technical
-design; do not build it), 26 unit tests + 9 Playwright E2E green.
+Frontend done: tokens, full design system, app shell, Home (health + performance
+chart + attention + insight), Money (5 tabs), complete capture engine
+(sale paid/credit/partial, expense, debt payments, categories, backdating),
+fix-with-history + remove-as-reversal, Stock (movement ledger, add-stock,
+stock-check, low-stock), Customers/Suppliers records, Reports/Insights
+(cash vs booked P/L, CSV, print-PDF). 26 unit + 28 Playwright E2E green.
 
-Not built yet: Setup flow, Stock, Customers/Suppliers screens, Partner/Research
-shell, Settings/People/Help, backend. Open owner decisions: logo art, Partner
-final name, Offline Capture Technical Design, backend kickoff.
+Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
+(argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable
+ledger with idempotency + reversal/fix, stock movement ledger, parties, sales
+orchestration, debts/settlements, LIVE analytics (dashboard/performance/reports),
+server-side CSV. 14 pytest green. Seed: `python -m app.seed`
+(mariama@example.sl / demo-password). Frontend proxies /api/v1 to it when
+`MIYONE_BACKEND_URL` is set (unset = in-repo mock for dev). The FULL Playwright
+suite passes unchanged against the real backend — keep it that way.
+
+Not built yet: Setup flow UI (backend /auth/register exists), Partner/Research
+shell (AI phase), Settings/People/Help, Alembic initial migration (required
+before production deploy), rate limiting, email transport, durable offline
+queue (GATED on approved technical design — do not build it). Open owner
+decisions: logo art, Partner final name, Insights→Reports rename.

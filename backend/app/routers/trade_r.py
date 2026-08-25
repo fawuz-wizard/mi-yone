@@ -1,0 +1,95 @@
+from fastapi import APIRouter, Depends, Header
+from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..common.money import format_money
+from ..core.db import get_db
+from ..core.deps import TenantContext, tenant
+from ..core.envelope import ok
+from ..models import Debt
+from ..serializers import debt_json, tx_json
+from ..services import trade
+
+router = APIRouter(prefix="/businesses/{bid}", tags=["trade"])
+
+
+class CreateSaleInput(BaseModel):
+    amount_minor: int
+    product_id: str | None = None
+    quantity: int | None = None
+    payment: str = "PAID"
+    amount_paid_minor: int | None = None
+    customer_id: str | None = None
+    description: str | None = None
+
+
+class CreateDebtInput(BaseModel):
+    counterparty_id: str
+    amount_minor: int
+    note: str | None = None
+
+
+class SettlementInput(BaseModel):
+    amount_minor: int
+
+
+@router.post("/sales")
+def create_sale(
+    body: CreateSaleInput,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    ctx: TenantContext = Depends(tenant),
+    db: Session = Depends(get_db),
+):
+    result, replay = trade.create_sale(
+        db, ctx.business.id, ctx.user.full_name,
+        amount_minor=body.amount_minor, product_id=body.product_id, quantity=body.quantity,
+        payment=body.payment, amount_paid_minor=body.amount_paid_minor,
+        customer_id=body.customer_id, description=body.description, idempotency_key=idempotency_key,
+    )
+    return ok(
+        {
+            "transaction": tx_json(result["transaction"]) if result["transaction"] else None,
+            "receivable": debt_json(db, result["receivable"]) if result["receivable"] else None,
+            "total": format_money(result["sale"].total_minor),
+        },
+        status_code=200 if replay else 201,
+    )
+
+
+def _list_debts(db: Session, business_id: str, kind: str) -> list[dict]:
+    rows = [
+        debt_json(db, d)
+        for d in db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.kind == kind))
+        if d.amount_minor - d.settled_minor > 0
+    ]
+    rows.sort(key=lambda d: (not d["overdue"], d["since"]))
+    return rows
+
+
+@router.get("/receivables")
+def list_receivables(ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+    return ok(_list_debts(db, ctx.business.id, "receivable"))
+
+
+@router.post("/receivables")
+def create_receivable(body: CreateDebtInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "receivable", body.counterparty_id, body.amount_minor)
+    return ok(debt_json(db, debt), status_code=201)
+
+
+@router.get("/payables")
+def list_payables(ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+    return ok(_list_debts(db, ctx.business.id, "payable"))
+
+
+@router.post("/payables")
+def create_payable(body: CreateDebtInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "payable", body.counterparty_id, body.amount_minor)
+    return ok(debt_json(db, debt), status_code=201)
+
+
+@router.post("/debts/{debt_id}/settlements")
+def settle(debt_id: str, body: SettlementInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+    debt, tx = trade.settle_debt(db, ctx.business.id, ctx.user.full_name, debt_id, body.amount_minor)
+    return ok({"debt": debt_json(db, debt), "transaction": tx_json(tx)}, status_code=201)

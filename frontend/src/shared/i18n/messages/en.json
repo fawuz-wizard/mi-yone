@@ -24,7 +24,7 @@
   "door.email": "Phone or email",
   "door.password": "Password",
   "door.signInFailed": "We couldn't sign you in. Check your details and try again.",
-  "door.demoNote": "Demo build — any email and password signs in to the example business.",
+  "door.demoNote": "Demo business — sign in with mariama@example.sl / demo-password.",
 
   "home.question": "How is my business doing?",
   "home.today": "Today",
