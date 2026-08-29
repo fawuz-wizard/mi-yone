@@ -95,6 +95,36 @@ export interface Envelope<T> {
   meta?: { page: number; per_page: number; total: number };
 }
 
+// Business Watch (deterministic monitoring layer) — alerts derived live from
+// recorded data; severity info < warning < critical.
+export interface WatchAlert {
+  id: string;
+  severity: "info" | "warning" | "critical";
+  what: string; // server-phrased, rendered verbatim (same rule as Money.display)
+  why: string;
+  action: string;
+  target: string;
+}
+
+export interface WatchResponse {
+  alerts: WatchAlert[];
+}
+
+// Progression/regression analytics — per-metric trend vs the previous period.
+// direction is null when history is insufficient to honestly call it.
+export interface TrendMetric {
+  key: "sales" | "money_out" | "left_over" | "units_sold" | "owed_to_you";
+  current: string; // display string, rendered verbatim
+  change_pct: string | null; // e.g. "+12.5" / "−8.0"
+  direction: "up" | "down" | "flat" | null;
+  tone: "good" | "bad" | "neutral";
+}
+
+export interface TrendsResponse {
+  range: string;
+  metrics: TrendMetric[];
+}
+
 export interface Product {
   id: string;
   name: string;

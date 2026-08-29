@@ -58,7 +58,13 @@ capture sheet as an editable confirmation preview, purchase → existing
 add-stock endpoint, owes-you/you-owe → existing debt endpoints, ambiguous →
 asks; validates against the business's own records — unusual price,
 insufficient stock, conflicting totals [block], possible duplicates — with
-block vs confirm-anyway severities). 61 unit + 45 Playwright E2E green.
+block vs confirm-anyway severities), Business Watch (server-derived alerts —
+stock, overdue debts, sales/profit/expense shifts, unusual costs, incomplete
+records — what/why/action with info/warning/critical severity, state-derived so
+never duplicated; Home's attention slot upgraded) + progression/regression
+trend tiles (`/analytics/trends`: per-metric value, %-change, ↑↓→ direction,
+tone; direction withheld when history is insufficient).
+61 unit + 50 Playwright E2E green; 37 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

@@ -42,6 +42,8 @@ export function RecordDetailSheet({
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["transactions"] });
     void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
     void qc.invalidateQueries({ queryKey: ["performance"] });
   };
 

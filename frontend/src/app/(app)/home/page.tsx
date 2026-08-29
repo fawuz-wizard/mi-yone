@@ -9,11 +9,12 @@ import type { DashboardResponse } from "@/shared/api/types";
 import { BUSINESS_ID } from "@/shared/api/session";
 import { HealthHeader, type Period } from "@/features/home/HealthHeader";
 import { PerformanceChart } from "@/features/home/PerformanceChart";
+import { TrendsRow } from "@/features/home/TrendsRow";
+import { WatchSection } from "@/features/home/WatchSection";
 import { useCapture } from "@/features/shell/AppShell";
 import { EmptyState } from "@/shared/design-system/EmptyState";
 import { SkeletonList } from "@/shared/design-system/SkeletonList";
 import { Button } from "@/shared/design-system/Button";
-import { AttentionRow } from "@/shared/design-system/AttentionRow";
 import { InsightCard } from "@/shared/design-system/InsightCard";
 import { captureQueue } from "@/shared/capture-queue";
 import { useT } from "@/shared/i18n";
@@ -78,21 +79,12 @@ export default function HomePage() {
           Self-hides when the ledger is empty — no wall of zeros for a new business. */}
       <PerformanceChart />
 
-      {/* Needs attention (max 4 rows, one tap from the fix — Phase 4 §13) */}
-      {data.attention.length === 0 ? (
-        <p className="rounded-card border border-border bg-surface px-4 py-3 text-sm font-medium text-money-in">
-          {t("home.nothingNeedsAttention")}
-        </p>
-      ) : (
-        <section
-          aria-label={t("home.needsAttention")}
-          className="divide-y divide-border overflow-hidden rounded-card border border-border"
-        >
-          {data.attention.slice(0, 4).map((a) => (
-            <AttentionRow key={a.id} item={a} />
-          ))}
-        </section>
-      )}
+      {/* Progression/regression tiles — is each key number improving or declining? */}
+      <TrendsRow />
+
+      {/* Business Watch (upgraded "needs attention" — Phase 4 §13 slot):
+          what happened, why it matters, what to consider doing. */}
+      <WatchSection />
 
       {/* One Partner insight (Phase 5 §35). */}
       {data.insight ? <InsightCard insight={data.insight} provenanceLabel={t("partner.fromRecords")} /> : null}

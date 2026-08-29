@@ -1037,3 +1037,259 @@ export function reportCsv(period: ReportPeriod): string {
 export function err(code: ApiErrorBody["code"], message: string): ApiErrorBody {
   return { code, message, request_id: `req-${Math.random().toString(36).slice(2, 10)}` };
 }
+
+// ============================================================
+// MOCK: Business Watch + progression/regression trends
+// (parity with backend services/watch.py and analytics.trends —
+//  deterministic, derived live from the mock's recorded data)
+// ============================================================
+import type { TrendMetric, TrendsResponse, WatchAlert, WatchResponse } from "@/shared/api/types";
+
+const SALES_DOWN_WARN = 15;
+const SALES_DOWN_CRIT = 30;
+const PROFIT_DOWN_WARN = 20;
+const EXPENSES_UP_WARN = 40;
+const EXPENSES_UP_CRIT = 100;
+const UNUSUAL_COST_HIGH = 1.5;
+const UNUSUAL_COST_LOW = 0.5;
+const PCT_GUARD = 500;
+const WINDOW_MS = 7 * 86400000;
+
+function pctChange(cur: number, prev: number): number | null {
+  if (prev <= 0) return null;
+  const pct = ((cur - prev) / prev) * 100;
+  return Math.abs(pct) <= PCT_GUARD ? pct : null;
+}
+
+export function computeWatch(): WatchResponse {
+  const now = Date.now();
+  const alerts: WatchAlert[] = [];
+  const active = productRows.filter((r) => !r.archived && r.track);
+  const levels = active.map((r) => ({ r, s: stockOf(r.id) }));
+  const moved = new Set(movements.map((m) => m.product_id));
+  const out = levels.filter(({ r, s }) => s <= 0 && moved.has(r.id));
+  const low = levels.filter(({ s, r }) => s > 0 && s <= r.threshold);
+  if (out.length > 0) {
+    alerts.push({
+      id: "watch-out-of-stock", severity: "critical",
+      what: out.length === 1 ? `${out[0].r.name} is sold out.` : `${out.length} products are sold out.`,
+      why: "You cannot sell what you do not have — every day out of stock is lost sales.",
+      action: "Restock as soon as you can, or mark the product archived if you no longer sell it.",
+      target: "/stock",
+    });
+  }
+  if (low.length > 0) {
+    const { r, s } = low[0];
+    alerts.push({
+      id: "watch-low-stock", severity: "warning",
+      what:
+        low.length === 1
+          ? `${r.name} is running low — only ${s} ${r.unit}${s !== 1 && !r.unit.endsWith("s") ? "s" : ""} left.`
+          : `${low.length} products are running low on stock.`,
+      why: "Running out mid-week can cost you sales and send customers elsewhere.",
+      action: "Plan a restock before it runs out.",
+      target: "/stock",
+    });
+  }
+
+  const overdue = debts.filter(
+    (d) => d.kind === "receivable" && d.amount_minor - d.settled_minor > 0 && d.due_date !== null && new Date(d.due_date).getTime() < now,
+  );
+  if (overdue.length > 0) {
+    const total = overdue.reduce((a, d) => a + d.amount_minor - d.settled_minor, 0);
+    const oldestDays = Math.max(...overdue.map((d) => (now - new Date(d.due_date as string).getTime()) / 86400000));
+    alerts.push({
+      id: "watch-overdue", severity: oldestDays > 30 ? "critical" : "warning",
+      what:
+        overdue.length === 1
+          ? `1 customer payment is overdue — ${overdue[0].counterparty_name} owes ${formatMoney(total).display}.`
+          : `${overdue.length} customer payments are overdue — ${formatMoney(total).display} in total.`,
+      why: "Money owed to you is cash you cannot use, and old debts get harder to collect.",
+      action: "Send a reminder, or agree a payment date you can follow up on.",
+      target: "/money?tab=owed",
+    });
+  }
+
+  const payableOverdue = debts.filter(
+    (d) => d.kind === "payable" && d.amount_minor - d.settled_minor > 0 && d.due_date !== null && new Date(d.due_date).getTime() < now,
+  );
+  if (payableOverdue.length > 0) {
+    const total = payableOverdue.reduce((a, d) => a + d.amount_minor - d.settled_minor, 0);
+    alerts.push({
+      id: "watch-payable-due", severity: "warning",
+      what: `You owe suppliers ${formatMoney(total).display} past the agreed date.`,
+      why: "Paying late can strain the supplier relationships your stock depends on.",
+      action: "Settle what you can, or talk to the supplier about a new date.",
+      target: "/money?tab=owe",
+    });
+  }
+
+  const curStart = now - WINDOW_MS;
+  const prevStart = now - 2 * WINDOW_MS;
+  const at = (iso: string) => new Date(iso).getTime();
+
+  const curSales = saleLog.filter((s) => at(s.at) >= curStart).reduce((a, s) => a + s.total_minor, 0);
+  const prevSales = saleLog.filter((s) => at(s.at) >= prevStart && at(s.at) < curStart).reduce((a, s) => a + s.total_minor, 0);
+  const salesPct = pctChange(curSales, prevSales);
+  const salesFell = salesPct !== null && salesPct <= -SALES_DOWN_WARN;
+  if (salesFell && salesPct !== null) {
+    alerts.push({
+      id: "watch-sales-down", severity: salesPct <= -SALES_DOWN_CRIT ? "critical" : "warning",
+      what: `Sales have fallen ${Math.abs(salesPct).toFixed(0)}% compared with your previous week (${formatMoney(curSales).display} vs ${formatMoney(prevSales).display}).`,
+      why: "A falling week can mean missing stock, fewer customers, or a price problem.",
+      action: "Check your top products and stock levels, and ask regular customers what changed.",
+      target: "/insights",
+    });
+  }
+
+  const txs = visibleTransactions();
+  const winSum = (type: Transaction["type"], from: number, to: number) =>
+    txs.filter((t) => t.type === type && at(t.occurred_at) >= from && at(t.occurred_at) < to).reduce((a, t) => a + t.amount.amount_minor, 0);
+  const curExp = winSum("EXPENSE", curStart, now + 1);
+  const prevExp = winSum("EXPENSE", prevStart, curStart);
+  const expPct = pctChange(curExp, prevExp);
+  if (expPct !== null && expPct >= EXPENSES_UP_WARN) {
+    const byCat = new Map<string, [number, number]>();
+    txs
+      .filter((t) => t.type === "EXPENSE" && at(t.occurred_at) >= prevStart)
+      .forEach((t) => {
+        const cur = byCat.get(t.category_name) ?? [0, 0];
+        cur[at(t.occurred_at) >= curStart ? 0 : 1] += t.amount.amount_minor;
+        byCat.set(t.category_name, cur);
+      });
+    const driver = [...byCat.entries()].sort((a, b) => (b[1][0] - b[1][1]) - (a[1][0] - a[1][1]))[0];
+    alerts.push({
+      id: "watch-expenses-up", severity: expPct >= EXPENSES_UP_CRIT ? "critical" : "warning",
+      what: `Money out is ${expPct.toFixed(0)}% higher than your previous week (${formatMoney(curExp).display} vs ${formatMoney(prevExp).display}).`,
+      why:
+        driver && driver[1][0] > driver[1][1]
+          ? `${driver[0]} is the biggest driver (${formatMoney(driver[1][0]).display} this week vs ${formatMoney(driver[1][1]).display} the week before).`
+          : "Costs rising faster than sales quietly eat your profit.",
+      action: "Open the week's spending and check each large record is right and necessary.",
+      target: "/money?tab=out",
+    });
+  }
+
+  const curIn = winSum("INCOME", curStart, now + 1);
+  const prevIn = winSum("INCOME", prevStart, curStart);
+  const curLeft = curIn - curExp;
+  const prevLeft = prevIn - prevExp;
+  if (!salesFell && prevLeft > 0) {
+    const leftPct = curLeft >= 0 ? pctChange(curLeft, prevLeft) : -100;
+    if (leftPct !== null && leftPct <= -PROFIT_DOWN_WARN) {
+      alerts.push({
+        id: "watch-profit-down", severity: "warning",
+        what: `You kept ${Math.abs(leftPct).toFixed(0)}% less this week than last (${formatMoney(curLeft).display} vs ${formatMoney(prevLeft).display}).`,
+        why: "Sales held up, but you kept less of them — costs are eating the difference.",
+        action: "Compare this week's spending with last week's to see where the money went.",
+        target: "/insights",
+      });
+    }
+  }
+
+  for (const m of movements) {
+    if (m.type !== "PURCHASE" || m.unit_cost === null || at(m.occurred_at) < curStart) continue;
+    const row = productRows.find((r) => r.id === m.product_id);
+    if (!row || row.cost_minor <= 0) continue;
+    const ratio = m.unit_cost.amount_minor / row.cost_minor;
+    if (ratio >= UNUSUAL_COST_HIGH || ratio <= UNUSUAL_COST_LOW) {
+      alerts.push({
+        id: `watch-unusual-cost-${m.id}`, severity: "info",
+        what: `You recorded ${formatMoney(m.unit_cost.amount_minor).display} per unit for ${row.name} — usually about ${formatMoney(row.cost_minor).display}.`,
+        why: "It could be a real price change, or a slip when recording.",
+        action: "Check the record; if the price really changed, update the product's cost.",
+        target: "/stock",
+      });
+      break; // one representative alert — never a wall of duplicates
+    }
+  }
+
+  const monthStart = now - 30 * 86400000;
+  const vague = txs.filter(
+    (t) => t.type === "EXPENSE" && at(t.occurred_at) >= monthStart && t.category_name === "General expense" && !(t.description ?? "").trim(),
+  );
+  if (vague.length >= 3) {
+    alerts.push({
+      id: "watch-incomplete", severity: "info",
+      what: `${vague.length} money-out records this month have no category or note.`,
+      why: "Records that say nothing make it impossible to see where money goes.",
+      action: "Open them and add a category or a short note while you still remember.",
+      target: "/money?tab=out",
+    });
+  }
+
+  const order = { critical: 0, warning: 1, info: 2 } as const;
+  alerts.sort((a, b) => order[a.severity] - order[b.severity]);
+  return { alerts };
+}
+
+const TREND_RANGES: Record<string, number> = { "7d": 7, "30d": 30, "3m": 91, "6m": 182, "1y": 365 };
+const TREND_FLAT_PCT = 5;
+
+function trendMetric(
+  key: TrendMetric["key"],
+  cur: number,
+  prev: number,
+  display: string,
+  goodWhenUp: boolean,
+  hasHistory: boolean,
+): TrendMetric {
+  let changePct: string | null = null;
+  let direction: TrendMetric["direction"] = null;
+  if (hasHistory && prev > 0) {
+    const pct = ((cur - prev) / prev) * 100;
+    if (Math.abs(pct) <= PCT_GUARD) {
+      changePct = `${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}`;
+      direction = Math.abs(pct) < TREND_FLAT_PCT ? "flat" : pct > 0 ? "up" : "down";
+    }
+  } else if (hasHistory && prev === 0 && cur === 0) {
+    direction = "flat";
+  }
+  let tone: TrendMetric["tone"] = "neutral";
+  if (direction === "up") tone = goodWhenUp ? "good" : "bad";
+  else if (direction === "down") tone = goodWhenUp ? "bad" : "good";
+  return { key, current: display, change_pct: changePct, direction, tone };
+}
+
+export function computeTrends(range: string): TrendsResponse {
+  const days = TREND_RANGES[range] ?? 30;
+  const now = Date.now();
+  const curStart = now - days * 86400000;
+  const prevStart = now - 2 * days * 86400000;
+  const at = (iso: string) => new Date(iso).getTime();
+
+  const txs = visibleTransactions();
+  const hasHistory = txs.some((t) => at(t.occurred_at) < curStart);
+  const winSum = (type: Transaction["type"], from: number, to: number) =>
+    txs.filter((t) => t.type === type && at(t.occurred_at) >= from && at(t.occurred_at) < to).reduce((a, t) => a + t.amount.amount_minor, 0);
+
+  const curSales = saleLog.filter((s) => at(s.at) >= curStart).reduce((a, s) => a + s.total_minor, 0);
+  const prevSales = saleLog.filter((s) => at(s.at) >= prevStart && at(s.at) < curStart).reduce((a, s) => a + s.total_minor, 0);
+  const curIn = winSum("INCOME", curStart, now + 1);
+  const prevIn = winSum("INCOME", prevStart, curStart);
+  const curOut = winSum("EXPENSE", curStart, now + 1);
+  const prevOut = winSum("EXPENSE", prevStart, curStart);
+  const curUnits = movements.filter((m) => m.type === "SALE" && at(m.occurred_at) >= curStart).reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+  const prevUnits = movements
+    .filter((m) => m.type === "SALE" && at(m.occurred_at) >= prevStart && at(m.occurred_at) < curStart)
+    .reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+
+  const receivables = debts.filter((d) => d.kind === "receivable");
+  const outstandingNow = receivables.reduce((a, d) => a + d.amount_minor - d.settled_minor, 0);
+  const newCredit = receivables.filter((d) => at(d.since) >= curStart).reduce((a, d) => a + d.amount_minor, 0);
+  const collected = txs
+    .filter((t) => t.type === "INCOME" && t.source === "SETTLEMENT" && at(t.occurred_at) >= curStart)
+    .reduce((a, t) => a + t.amount.amount_minor, 0);
+  const outstandingStart = outstandingNow - newCredit + collected;
+
+  return {
+    range,
+    metrics: [
+      trendMetric("sales", curSales, prevSales, formatMoney(curSales).display, true, hasHistory),
+      trendMetric("money_out", curOut, prevOut, formatMoney(curOut).display, false, hasHistory),
+      trendMetric("left_over", curIn - curOut, prevIn - prevOut, formatMoney(curIn - curOut).display, true, hasHistory),
+      trendMetric("units_sold", curUnits, prevUnits, String(curUnits), true, hasHistory),
+      trendMetric("owed_to_you", outstandingNow, outstandingStart, formatMoney(outstandingNow).display, false, hasHistory && outstandingStart > 0),
+    ],
+  };
+}

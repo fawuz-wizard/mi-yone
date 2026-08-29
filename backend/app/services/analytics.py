@@ -167,6 +167,77 @@ def performance(db: Session, business_id: str, range_: str) -> dict:
     }
 
 
+TREND_RANGES = {"7d": 7, "30d": 30, "3m": 91, "6m": 182, "1y": 365}
+TREND_FLAT_PCT = 5.0
+TREND_PCT_GUARD = 500.0
+
+
+def _trend_metric(key: str, cur: int, prev: int, display: str, good_when_up: bool, has_history: bool) -> dict:
+    """One progression/regression tile. direction is None when there is not
+    enough history to honestly call it — never labeled improving/declining then."""
+    change_pct = None
+    direction = None
+    if has_history and prev > 0:
+        pct = (cur - prev) / prev * 100
+        if abs(pct) <= TREND_PCT_GUARD:
+            change_pct = f"{'+' if pct >= 0 else '−'}{abs(pct):.1f}"
+            direction = "flat" if abs(pct) < TREND_FLAT_PCT else "up" if pct > 0 else "down"
+    elif has_history and prev == 0 and cur == 0:
+        direction = "flat"
+    tone = "neutral"
+    if direction == "up":
+        tone = "good" if good_when_up else "bad"
+    elif direction == "down":
+        tone = "bad" if good_when_up else "good"
+    return {"key": key, "current": display, "change_pct": change_pct, "direction": direction, "tone": tone}
+
+
+def trends(db: Session, business_id: str, range_: str) -> dict:
+    """Progression/regression per metric: current window vs the equal previous
+    window. Deterministic; the AI Partner will later interpret, never replace."""
+    days = TREND_RANGES[range_]
+    now = utcnow()
+    cur_start = now - timedelta(days=days)
+    prev_start = now - timedelta(days=2 * days)
+    end = now + timedelta(seconds=1)
+
+    rows = _visible(db, business_id)
+    # "enough history" = anything at all recorded before the current window
+    has_history = any(t.occurred_at < cur_start for t in rows)
+
+    sales_rows = list(db.scalars(select(Sale).where(Sale.business_id == business_id)))
+    cur_sales = sum(s.total_minor for s in sales_rows if cur_start <= s.occurred_at < end)
+    prev_sales = sum(s.total_minor for s in sales_rows if prev_start <= s.occurred_at < cur_start)
+
+    cur_in, cur_out = _sum_window(rows, cur_start, end)
+    prev_in, prev_out = _sum_window(rows, prev_start, cur_start)
+
+    movements = [
+        m for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business_id, StockMovement.type == "SALE"))
+    ]
+    cur_units = sum(abs(m.quantity_delta) for m in movements if cur_start <= m.occurred_at < end)
+    prev_units = sum(abs(m.quantity_delta) for m in movements if prev_start <= m.occurred_at < cur_start)
+
+    # Owed to you: outstanding now, and its exact change over the window
+    # (new credit extended − settlements received; both are recorded facts).
+    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.kind == "receivable")))
+    outstanding_now = sum(d.amount_minor - d.settled_minor for d in debts)
+    new_credit = sum(d.amount_minor for d in debts if cur_start <= d.since < end)
+    collected = sum(
+        t.amount_minor for t in rows if t.type == "INCOME" and t.source == "SETTLEMENT" and cur_start <= t.occurred_at < end
+    )
+    outstanding_start = outstanding_now - new_credit + collected
+
+    metrics = [
+        _trend_metric("sales", cur_sales, prev_sales, format_money(cur_sales)["display"], True, has_history),
+        _trend_metric("money_out", cur_out, prev_out, format_money(cur_out)["display"], False, has_history),
+        _trend_metric("left_over", cur_in - cur_out, prev_in - prev_out, format_money(cur_in - cur_out)["display"], True, has_history),
+        _trend_metric("units_sold", cur_units, prev_units, str(cur_units), True, has_history),
+        _trend_metric("owed_to_you", outstanding_now, outstanding_start, format_money(outstanding_now)["display"], False, has_history and outstanding_start > 0),
+    ]
+    return {"range": range_, "metrics": metrics}
+
+
 def report(db: Session, business_id: str, period: str) -> dict:
     now = utcnow()
     if period == "today":

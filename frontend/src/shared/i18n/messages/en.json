@@ -309,5 +309,21 @@
   "nlc.issue.usedCatalogCost": "No cost was said — we used your recorded cost price. Check it.",
   "nlc.issue.unusualPrice": "{product} is usually around Le {usual}. You entered Le {entered} — save anyway if that's right.",
   "nlc.issue.insufficientStock": "Your records show only {have} left in stock. Save anyway if that's right.",
-  "nlc.issue.possibleDuplicate": "This looks like a record saved a few minutes ago (same amount). Save anyway if it's a new one."
+  "nlc.issue.possibleDuplicate": "This looks like a record saved a few minutes ago (same amount). Save anyway if it's a new one.",
+  "watch.title": "Business watch",
+  "watch.whyLabel": "Why it matters",
+  "watch.actionLabel": "What you can do",
+  "watch.open": "Open",
+  "watch.details": "Details",
+  "trends.title": "How things are moving",
+  "trends.vsPrevious": "Last 30 days vs the 30 days before",
+  "trends.sales": "Sales",
+  "trends.money_out": "Money out",
+  "trends.left_over": "Left over",
+  "trends.units_sold": "Items sold",
+  "trends.owed_to_you": "Owed to you",
+  "trends.improving": "Improving",
+  "trends.declining": "Declining",
+  "trends.stable": "Stable",
+  "trends.notEnoughData": "Not enough history yet"
 }

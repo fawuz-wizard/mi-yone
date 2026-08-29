@@ -6,6 +6,7 @@ from ..core.db import get_db
 from ..core.deps import TenantContext, tenant
 from ..core.envelope import ok
 from ..services import analytics
+from ..services.watch import compute_watch
 
 router = APIRouter(prefix="/businesses/{bid}", tags=["analytics"])
 
@@ -23,6 +24,17 @@ def dashboard(period: str = "today", ctx: TenantContext = Depends(tenant), db: S
 def performance(range: str = "30d", ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
     r = range if range in analytics.PERF_RANGES else "30d"
     return ok(analytics.performance(db, ctx.business.id, r))
+
+
+@router.get("/analytics/trends")
+def trends(range: str = "30d", ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+    r = range if range in analytics.TREND_RANGES else "30d"
+    return ok(analytics.trends(db, ctx.business.id, r))
+
+
+@router.get("/watch")
+def watch(ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+    return ok({"alerts": compute_watch(db, ctx.business.id)})
 
 
 @router.get("/reports")

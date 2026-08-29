@@ -16,6 +16,8 @@ const invalidateStock = (qc: ReturnType<typeof useQueryClient>) => {
   void qc.invalidateQueries({ queryKey: ["products"] });
   void qc.invalidateQueries({ queryKey: ["product"] });
   void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
   void qc.invalidateQueries({ queryKey: ["transactions"] });
   void qc.invalidateQueries({ queryKey: ["debts"] });
 };

@@ -14,6 +14,8 @@ function invalidateParties(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries({ queryKey: ["party"] });
   void qc.invalidateQueries({ queryKey: ["debts"] });
   void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
   void qc.invalidateQueries({ queryKey: ["customers"] });
   void qc.invalidateQueries({ queryKey: ["transactions"] });
 }

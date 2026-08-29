@@ -25,6 +25,8 @@ export function useCreateTransaction() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
     },
   });
@@ -37,6 +39,8 @@ export function useCreateSale() {
       api<SaleResult>(`/businesses/${BUSINESS_ID}/sales`, { method: "POST", body: input, idempotencyKey }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
       void qc.invalidateQueries({ queryKey: ["debts"] });
       void qc.invalidateQueries({ queryKey: ["products"] });
@@ -112,6 +116,8 @@ export function useRecordPurchase() {
       void qc.invalidateQueries({ queryKey: ["products"] });
       void qc.invalidateQueries({ queryKey: ["product"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
       void qc.invalidateQueries({ queryKey: ["debts"] });
     },
@@ -132,6 +138,8 @@ export function useRecordDebt() {
       void qc.invalidateQueries({ queryKey: ["customers"] });
       void qc.invalidateQueries({ queryKey: ["suppliers"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
     },
   });
 }
@@ -143,6 +151,8 @@ export function useUndoTransaction() {
       api(`/businesses/${BUSINESS_ID}/transactions/${txId}/reverse`, { method: "POST", body: {} }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
+      void qc.invalidateQueries({ queryKey: ["watch"] });
+      void qc.invalidateQueries({ queryKey: ["trends"] });
       void qc.invalidateQueries({ queryKey: ["transactions"] });
     },
   });
