@@ -13,7 +13,8 @@ import { EMPTY_AMOUNT, fromMinor, isEmpty, toMinor, type AmountState } from "@/s
 import { useT } from "@/shared/i18n";
 import { PriceField } from "./PriceField";
 import { ProductFormSheet } from "./ProductFormSheet";
-import { useAddStock, useProductDetail, useStockCheck, useSuppliers, useUpdateProduct } from "./api";
+import { useAddStock, useProductDetail, useRemoveProductImage, useStockCheck, useSuppliers, useUpdateProduct, useUploadProductImage } from "./api";
+import { useRef } from "react";
 
 type Mode = "detail" | "add-stock" | "stock-check" | "edit";
 
@@ -117,6 +118,7 @@ export function ProductDetailSheet({ productId, onClose }: { productId: string |
       >
         {product ? (
           <div className="space-y-3 pb-4">
+            <ProductPhotoBlock product={product} />
             <div className="grid grid-cols-2 gap-3">
               <Fact label={t("stock.inStock")} value={`${product.stock} ${product.unit}`} warn={product.low_stock} />
               <Fact label={t("stock.value")} value={product.stock_value.display} />
@@ -301,5 +303,76 @@ function ToggleOption({
     >
       {label}
     </button>
+  );
+}
+
+
+// Product photo (Photo-to-Product): shown when present; add/change/remove here
+// so a failed upload at creation always has a recovery path.
+function ProductPhotoBlock({ product }: { product: Product }) {
+  const t = useT();
+  const toast = useToast();
+  const upload = useUploadProductImage();
+  const remove = useRemoveProductImage();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const ALLOWED = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+  function pick(file: File | null) {
+    if (!file) return;
+    if (!ALLOWED.has(file.type) || file.size === 0 || file.size > 5 * 1024 * 1024) {
+      toast.show({ message: t(file.size > 5 * 1024 * 1024 ? "stock.photoTooBig" : "stock.photoBadType") });
+      return;
+    }
+    upload.mutate(
+      { productId: product.id, file },
+      {
+        onSuccess: () => toast.show({ message: t("stock.photoSavedToast") }),
+        onError: () => toast.show({ message: t("error.generic") }),
+      },
+    );
+  }
+
+  return (
+    <div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        hidden
+        onChange={(e) => pick(e.target.files?.[0] ?? null)}
+        data-testid="detail-photo-input"
+      />
+      {product.has_image && product.image_url ? (
+        <div className="space-y-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={product.image_url}
+            alt={t("stock.photoOf", { name: product.name })}
+            className="h-40 w-full rounded-card border border-border object-cover"
+            data-testid="detail-photo"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <Button level="secondary" onClick={() => fileRef.current?.click()} loading={upload.isPending} loadingLabel={t("stock.changePhoto")} data-testid="detail-photo-change">
+              {t("stock.changePhoto")}
+            </Button>
+            <Button
+              level="secondary"
+              onClick={() =>
+                remove.mutate(product.id, { onSuccess: () => toast.show({ message: t("stock.photoRemoved") }) })
+              }
+              loading={remove.isPending}
+              loadingLabel={t("stock.removePhoto")}
+              data-testid="detail-photo-remove"
+            >
+              {t("stock.removePhoto")}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button level="secondary" fullWidth onClick={() => fileRef.current?.click()} loading={upload.isPending} loadingLabel={t("stock.addPhoto")} data-testid="detail-photo-add">
+          {t("stock.addPhoto")}
+        </Button>
+      )}
+    </div>
   );
 }

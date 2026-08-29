@@ -73,7 +73,15 @@ test("a sale with a product decrements stock via the movement ledger", async ({ 
   await signIn(page);
   await page.getByTestId("fab-add").click();
   await page.getByTestId("choose-money-in").click();
-  await page.getByRole("radio", { name: /Soap/ }).click();
+  // With many products the Soap chip can live behind "More…" — the More sheet
+  // lists every product with a search.
+  const soapChip = page.getByRole("radio", { name: /Soap \(bar\)/ });
+  if (await soapChip.isVisible().catch(() => false)) {
+    await soapChip.click();
+  } else {
+    await page.getByRole("button", { name: "More…" }).first().click();
+    await page.getByRole("button", { name: /Soap \(bar\)/ }).click();
+  }
   await page.getByTestId("capture-save").click();
   await expect(page.getByTestId("toast")).toContainText("Le 1,500");
 

@@ -187,6 +187,12 @@ export interface Product {
   stock_value: Money; // stock × cost price — ESTIMATED (label it)
   track_inventory: boolean;
   archived: boolean;
+  // Photo-to-Product (all optional)
+  description: string | null;
+  sku: string | null;
+  category: string | null;
+  has_image: boolean;
+  image_url: string | null; // tenant-guarded API path, renderable in <img>
 }
 
 export type MovementType = "PURCHASE" | "SALE" | "ADJUSTMENT" | "DAMAGE";
@@ -209,6 +215,9 @@ export interface CreateProductInput {
   cost_price_minor?: number;
   low_stock_threshold?: number;
   initial_stock?: number;
+  description?: string;
+  sku?: string;
+  category?: string;
 }
 
 export interface UpdateProductInput {
@@ -218,6 +227,18 @@ export interface UpdateProductInput {
   cost_price_minor?: number;
   low_stock_threshold?: number;
   archived?: boolean;
+  description?: string;
+  sku?: string;
+  category?: string;
+}
+
+// AI photo suggestions — name/category/description ONLY; price is never
+// suggested (the owner provides and confirms the price, always).
+export interface PhotoSuggestions {
+  available: boolean;
+  name: string | null;
+  category: string | null;
+  description: string | null;
 }
 
 export interface AddStockInput {

@@ -114,6 +114,11 @@ class Product(Base):
     low_stock_threshold: Mapped[int] = mapped_column(Integer, default=5)
     track_inventory: Mapped[bool] = mapped_column(Boolean, default=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Photo-to-Product (all optional — no setup homework, Phase 3 rule)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sku: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    image_key: Mapped[str | None] = mapped_column(String(200), nullable=True)  # storage key, never a raw path
 
 
 class StockMovement(Base):

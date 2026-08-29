@@ -55,6 +55,11 @@ def product_json(db: Session, p: Product) -> dict:
         "stock_value": format_money(max(0, stock) * p.cost_minor),
         "track_inventory": p.track_inventory,
         "archived": p.archived,
+        "description": p.description,
+        "sku": p.sku,
+        "category": p.category,
+        "has_image": p.image_key is not None,
+        "image_url": f"/api/v1/businesses/{p.business_id}/products/{p.id}/image" if p.image_key else None,
     }
 
 

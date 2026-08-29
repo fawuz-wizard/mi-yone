@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = "claude-sonnet-4-5"
 
+    # File storage (product photos) — local disk now, object storage later
+    upload_dir: str = "./var/uploads"
+
     # WhatsApp catalog integration (Phase 2 integration layer)
     wa_mode: str = "test"  # "test" (labeled sample adapter) | "live" (Meta Graph API)
     wa_access_token: str = ""

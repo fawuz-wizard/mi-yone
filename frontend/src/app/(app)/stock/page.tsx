@@ -87,7 +87,7 @@ export default function StockPage() {
       )}
 
       <ProductDetailSheet productId={selectedId} onClose={() => setSelectedId(null)} />
-      <ProductFormSheet open={creating} product={null} onClose={() => setCreating(false)} />
+      <ProductFormSheet open={creating} product={null} existingProducts={products.data ?? []} onClose={() => setCreating(false)} />
     </div>
   );
 }

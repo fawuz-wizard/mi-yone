@@ -78,7 +78,14 @@ Setup flow (5I): welcome → /signup (name, business name, phone/email, password
 localStorage-backed (`setActiveBusiness`), sign-in/up do a full navigation to
 rebind it; mock register signs into the labeled demo store (single-tenant) and
 mock login now validates the demo credentials.
-61 unit + 63 Playwright E2E green; 59 backend tests.
+Photo-to-Product: file storage architecture (`core/storage.py`, local disk,
+validated server-generated keys, MIYONE_UPLOAD_DIR), Product gains optional
+description/sku/category/image_key; image upload/serve/remove routes
+(tenant-guarded, ADMIN+ mutations); `ai/vision.py` suggestion provider
+(Anthropic env-gated, name/category/description ONLY — never price; local →
+available:false, honest); photo-first product form with preview/replace/remove,
+duplicate-name warning, suggestion chips; detail-sheet photo block.
+61 unit + 68 Playwright E2E green; 66 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

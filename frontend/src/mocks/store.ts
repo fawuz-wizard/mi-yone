@@ -378,6 +378,22 @@ interface ProductRow {
   threshold: number;
   track: boolean;
   archived: boolean;
+  description?: string | null;
+  sku?: string | null;
+  category?: string | null;
+}
+
+// MOCK image store: product photos held in memory (base64), served by the
+// mock image route. Real backend: validated file storage on disk.
+const productImages = new Map<string, { b64: string; type: string }>();
+export function setProductImage(productId: string, b64: string, type: string): void {
+  productImages.set(productId, { b64, type });
+}
+export function getProductImage(productId: string): { b64: string; type: string } | null {
+  return productImages.get(productId) ?? null;
+}
+export function removeProductImage(productId: string): void {
+  productImages.delete(productId);
 }
 
 const productRows: ProductRow[] = [
@@ -437,6 +453,11 @@ export function toProduct(row: ProductRow): Product {
     stock_value: formatMoney(Math.max(0, stock) * row.cost_minor), // estimated (latest cost, Phase 2 §7.1)
     track_inventory: row.track,
     archived: row.archived,
+    description: row.description ?? null,
+    sku: row.sku ?? null,
+    category: row.category ?? null,
+    has_image: productImages.has(row.id),
+    image_url: productImages.has(row.id) ? `/api/v1/businesses/b-demo-1/products/${row.id}/image` : null,
   };
 }
 
@@ -462,6 +483,9 @@ export function createProduct(input: {
   cost_price_minor?: number;
   low_stock_threshold?: number;
   initial_stock?: number;
+  description?: string;
+  sku?: string;
+  category?: string;
 }): Product {
   const row: ProductRow = {
     id: id("p"),
@@ -472,6 +496,9 @@ export function createProduct(input: {
     threshold: input.low_stock_threshold ?? 5,
     track: true,
     archived: false,
+    description: input.description?.trim() || null,
+    sku: input.sku?.trim() || null,
+    category: input.category?.trim() || null,
   };
   productRows.push(row);
   if (input.initial_stock && input.initial_stock > 0) {

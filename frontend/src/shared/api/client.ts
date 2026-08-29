@@ -6,7 +6,7 @@ import { DomainError, mapApiError, networkError } from "./errors";
 const BASE = "/api/v1";
 
 interface RequestOptions {
-  method?: "GET" | "POST" | "PATCH";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   idempotencyKey?: string;
 }
@@ -23,6 +23,29 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       credentials: "same-origin",
     });
+  } catch {
+    throw networkError();
+  }
+  let envelope: Envelope<T> | undefined;
+  try {
+    envelope = (await res.json()) as Envelope<T>;
+  } catch {
+    envelope = undefined;
+  }
+  if (!res.ok || !envelope?.success) {
+    throw mapApiError(res.status, envelope?.error);
+  }
+  return envelope.data as T;
+}
+
+// Multipart upload (product photos). Same envelope/error discipline as api();
+// the browser sets the multipart boundary header itself.
+export async function apiUpload<T>(path: string, file: File | Blob, fieldName = "file"): Promise<T> {
+  const form = new FormData();
+  form.append(fieldName, file);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { method: "POST", body: form, credentials: "same-origin" });
   } catch {
     throw networkError();
   }

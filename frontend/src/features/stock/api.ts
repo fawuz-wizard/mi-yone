@@ -1,10 +1,11 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/shared/api/client";
+import { api, apiUpload } from "@/shared/api/client";
 import { BUSINESS_ID } from "@/shared/api/session";
 import type {
   AddStockInput,
   CreateProductInput,
+  PhotoSuggestions,
   Product,
   StockCheckInput,
   StockMovement,
@@ -74,5 +75,33 @@ export function useStockCheck() {
         { method: "POST", body: input },
       ),
     onSuccess: () => invalidateStock(qc),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Photo-to-Product: image upload/remove + AI suggestions (never a price)
+// ---------------------------------------------------------------------------
+
+export function useUploadProductImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ productId, file }: { productId: string; file: File }) =>
+      apiUpload<Product>(`/businesses/${BUSINESS_ID}/products/${productId}/image`, file),
+    onSuccess: () => invalidateStock(qc),
+  });
+}
+
+export function useRemoveProductImage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (productId: string) =>
+      api<Product>(`/businesses/${BUSINESS_ID}/products/${productId}/image`, { method: "DELETE" }),
+    onSuccess: () => invalidateStock(qc),
+  });
+}
+
+export function useSuggestFromPhoto() {
+  return useMutation({
+    mutationFn: (file: File) => apiUpload<PhotoSuggestions>(`/businesses/${BUSINESS_ID}/products/suggest`, file),
   });
 }
