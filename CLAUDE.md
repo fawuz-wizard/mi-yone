@@ -64,7 +64,16 @@ records — what/why/action with info/warning/critical severity, state-derived s
 never duplicated; Home's attention slot upgraded) + progression/regression
 trend tiles (`/analytics/trends`: per-metric value, %-change, ↑↓→ direction,
 tone; direction withheld when history is insufficient).
-61 unit + 50 Playwright E2E green; 37 backend tests.
+Partner AI (backend `app/ai/` — deterministic intent router + evidence builder
+over existing analytics/watch/trends; provider abstraction: built-in "local"
+composer default, Anthropic adapter env-gated via MIYONE_AI_PROVIDER/API_KEY
+with grounded-facts-only prompt + local fallback; conversation in ai_messages;
+Partner is READ-ONLY over records; chat UI in features/partner) and WhatsApp
+catalog integration (`app/integrations/catalog.py` provider boundary — TEST
+adapter default, honestly labeled, Meta Graph adapter credential-gated via
+MIYONE_WA_*; connect → import → review → approve/skip with duplicate detection;
+approve creates a normal product; UI in features/stock/WhatsAppImportSheet).
+61 unit + 58 Playwright E2E green; 56 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

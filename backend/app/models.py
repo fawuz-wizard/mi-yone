@@ -184,3 +184,61 @@ class AuditEvent(Base):
     entity_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AIMessage(Base):
+    """Partner conversation history (Phase 2 AI memory concept #1). One rolling
+    thread per business; the Partner is read-only over business records — these
+    rows are the ONLY thing it writes."""
+
+    __tablename__ = "ai_messages"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    role: Mapped[str] = mapped_column(String(10))  # "owner" | "partner"
+    text: Mapped[str] = mapped_column(Text)
+    intent: Mapped[str | None] = mapped_column(String(30), nullable=True)  # provenance
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class CatalogConnection(Base):
+    """A connected external catalog source (Phase 2 integration layer). The
+    provider adapter behind it is isolated — 'test' today, Meta/WhatsApp
+    Business API when real credentials are configured."""
+
+    __tablename__ = "catalog_connections"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(20))  # "whatsapp"
+    mode: Mapped[str] = mapped_column(String(10))  # "test" | "live"
+    status: Mapped[str] = mapped_column(String(20), default="CONNECTED")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CatalogImport(Base):
+    __tablename__ = "catalog_imports"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    connection_id: Mapped[str] = mapped_column(ForeignKey("catalog_connections.id"))
+    status: Mapped[str] = mapped_column(String(20))  # IMPORTING | IMPORTED | FAILED
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class CatalogImportItem(Base):
+    """One catalog product awaiting the owner's review. Nothing becomes a real
+    MI YONE product until the owner approves it."""
+
+    __tablename__ = "catalog_import_items"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    import_id: Mapped[str] = mapped_column(ForeignKey("catalog_imports.id"), index=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    price_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # None = incomplete
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    sku: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    availability: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "in stock" etc.
+    status: Mapped[str] = mapped_column(String(20), default="NEEDS_REVIEW")  # NEEDS_REVIEW | APPROVED | SKIPPED
+    duplicate_of_product_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    product_id: Mapped[str | None] = mapped_column(String(40), nullable=True)  # set on approve

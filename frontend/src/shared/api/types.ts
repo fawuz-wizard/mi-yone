@@ -95,6 +95,56 @@ export interface Envelope<T> {
   meta?: { page: number; per_page: number; total: number };
 }
 
+// Partner AI — conversation over verified records (never the source of truth).
+export interface PartnerMessage {
+  id: string;
+  role: "owner" | "partner";
+  text: string;
+  intent: string | null;
+  created_at: string;
+}
+
+export interface PartnerHistoryResponse {
+  messages: PartnerMessage[];
+  provider: string; // "local" (built-in composer) | external provider name
+}
+
+export interface PartnerAskResponse {
+  owner: PartnerMessage;
+  partner: PartnerMessage;
+}
+
+// WhatsApp catalog integration (provider-isolated; "test" mode = sample adapter).
+export interface WaItem {
+  id: string;
+  name: string;
+  description: string | null;
+  price: Money | null; // null = the catalog stated no price
+  image_url: string | null;
+  category: string | null;
+  sku: string | null;
+  availability: string | null;
+  status: "NEEDS_REVIEW" | "APPROVED" | "SKIPPED";
+  duplicate_of_product_id: string | null;
+  duplicate_name: string | null;
+  product_id: string | null;
+}
+
+export interface WaImport {
+  id: string;
+  status: "IMPORTING" | "IMPORTED" | "FAILED";
+  error: string | null;
+  created_at: string;
+  items: WaItem[];
+  needs_review: number;
+}
+
+export interface WaStatusResponse {
+  mode: "test" | "live";
+  connection: { id: string; status: string; mode: string } | null;
+  latest_import: WaImport | null;
+}
+
 // Business Watch (deterministic monitoring layer) — alerts derived live from
 // recorded data; severity info < warning < critical.
 export interface WatchAlert {

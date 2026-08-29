@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from .core.db import SessionLocal
 from .core.envelope import install_handlers, ok
-from .routers import analytics_r, auth, finance_r, parties_r, stock_r, trade_r
+from .routers import analytics_r, auth, finance_r, integrations_r, parties_r, partner_r, stock_r, trade_r
 
 logger = logging.getLogger("miyone")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -43,6 +43,8 @@ app.include_router(stock_r.router, prefix=API)
 app.include_router(parties_r.router, prefix=API)
 app.include_router(trade_r.router, prefix=API)
 app.include_router(analytics_r.router, prefix=API)
+app.include_router(partner_r.router, prefix=API)
+app.include_router(integrations_r.router, prefix=API)
 
 
 @app.get("/health")

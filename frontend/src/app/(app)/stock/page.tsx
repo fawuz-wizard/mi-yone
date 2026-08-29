@@ -6,6 +6,7 @@ import { Plus } from "lucide-react";
 import { useProducts } from "@/features/capture/api";
 import { ProductDetailSheet } from "@/features/stock/ProductDetailSheet";
 import { ProductFormSheet } from "@/features/stock/ProductFormSheet";
+import { WhatsAppImportSheet } from "@/features/stock/WhatsAppImportSheet";
 import { Button } from "@/shared/design-system/Button";
 import { EmptyState } from "@/shared/design-system/EmptyState";
 import { SearchField } from "@/shared/design-system/SearchField";
@@ -17,6 +18,7 @@ export default function StockPage() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const products = useProducts(true);
 
   const rows = useMemo(
@@ -34,7 +36,12 @@ export default function StockPage() {
         <Button level="secondary" onClick={() => setCreating(true)} data-testid="new-product">
           <Plus size={16} aria-hidden /> {t("stock.addProduct")}
         </Button>
+        <Button level="secondary" onClick={() => setImporting(true)} data-testid="wa-open">
+          {t("wa.entry")}
+        </Button>
       </div>
+
+      <WhatsAppImportSheet open={importing} onClose={() => setImporting(false)} />
 
       {products.isPending ? (
         <SkeletonList rows={4} />

@@ -10,6 +10,16 @@ class Settings(BaseSettings):
     session_absolute_cap_days: int = 90
     cookie_secure: bool = False  # True behind TLS in production
 
+    # Partner AI (Phase 2: provider-swappable, never the source of truth)
+    ai_provider: str = "local"  # "local" (built-in composer) | "anthropic"
+    ai_api_key: str = ""
+    ai_model: str = "claude-sonnet-4-5"
+
+    # WhatsApp catalog integration (Phase 2 integration layer)
+    wa_mode: str = "test"  # "test" (labeled sample adapter) | "live" (Meta Graph API)
+    wa_access_token: str = ""
+    wa_business_account_id: str = ""
+
     model_config = {"env_prefix": "MIYONE_", "env_file": ".env", "extra": "ignore"}
 
 
