@@ -51,11 +51,14 @@ chart + attention + insight), Money (5 tabs), complete capture engine
 (sale paid/credit/partial, expense, debt payments, categories, backdating),
 fix-with-history + remove-as-reversal, Stock (movement ledger, add-stock,
 stock-check, low-stock), Customers/Suppliers records, Reports/Insights
-(cash vs booked P/L, CSV, print-PDF), natural-language + voice quick sale
-(deterministic client-side interpreter `features/capture/interpret.ts` — EN/
-Krio/mixed, never invents values, flags issues; fills the ONE capture sheet as
-an editable confirmation preview; recording uses the existing sale path).
-45 unit + 36 Playwright E2E green.
+(cash vs booked P/L, CSV, print-PDF), natural-language + voice quick entry
+(deterministic interpreter `features/capture/interpret.ts` — EN/Krio/mixed,
+never invents values, never guesses intent; routes sale/expense into the ONE
+capture sheet as an editable confirmation preview, purchase → existing
+add-stock endpoint, owes-you/you-owe → existing debt endpoints, ambiguous →
+asks; validates against the business's own records — unusual price,
+insufficient stock, conflicting totals [block], possible duplicates — with
+block vs confirm-anyway severities). 61 unit + 45 Playwright E2E green.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

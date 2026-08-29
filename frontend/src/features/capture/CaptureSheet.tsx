@@ -21,6 +21,8 @@ import {
   useCreateTransaction,
   useCustomers,
   useProducts,
+  useRecentTransactions,
+  useSuppliers,
   useUndoTransaction,
 } from "./api";
 import {
@@ -59,11 +61,14 @@ export function CaptureSheet({
   const createCustomer = useCreateCustomer();
   const undo = useUndoTransaction();
 
-  const isSale = state.name !== "IDLE" && state.kind === "sale";
   const isOpen = state.name !== "IDLE" && state.name !== "SUCCESS";
-  const products = useProducts(isOpen && isSale);
-  const customers = useCustomers(isOpen && isSale);
-  const categories = useCategories("EXPENSE", isOpen && !isSale);
+  // Quick entry can route to any record type, so reference data loads while
+  // the sheet is open regardless of the current kind.
+  const products = useProducts(isOpen);
+  const customers = useCustomers(isOpen);
+  const categories = useCategories("EXPENSE", isOpen);
+  const suppliers = useSuppliers(isOpen);
+  const recentTx = useRecentTransactions(isOpen);
 
   const [amount, setAmount] = useState<AmountState>(EMPTY_AMOUNT);
   const [note, setNote] = useState("");
@@ -81,7 +86,7 @@ export function CaptureSheet({
   const [unitOverrideMinor, setUnitOverrideMinor] = useState<number | null>(null);
 
   const dirty = !isEmpty(amount);
-  const needsCustomer = isSale && payment === "OWES" && !customerId;
+  const needsCustomer = state.name !== "IDLE" && state.kind === "sale" && payment === "OWES" && !customerId;
 
   const reset = useCallback(() => {
     setAmount(EMPTY_AMOUNT);
@@ -116,7 +121,10 @@ export function CaptureSheet({
 
   // Apply an interpreted quick entry to the form. The filled form is the
   // confirmation preview — nothing is recorded until the owner presses Save.
+  // A sale phrase typed in the expense sheet (or vice versa) switches the kind.
   function applyInterpreted(r: InterpretedSale) {
+    if (state.name === "IDLE") return;
+    setState({ name: "EDITING", kind: "sale", idempotencyKey: state.idempotencyKey });
     setAmount(r.totalMinor !== null ? fromMinor(r.totalMinor) : EMPTY_AMOUNT);
     setProductId(r.productId);
     setQuantity(r.quantity ?? 1);
@@ -132,7 +140,22 @@ export function CaptureSheet({
       setPaidNow(r.paidNowMinor !== null ? fromMinor(r.paidNowMinor) : EMPTY_AMOUNT);
     }
     setCustomerId(r.customerId);
-    if (state.name === "OPEN") setState({ ...state, name: "EDITING" });
+  }
+
+  // Expense routed from the quick entry: switch the sheet to the expense form.
+  function applyInterpretedExpense(r: InterpretedSale) {
+    if (state.name === "IDLE") return;
+    setState({ name: "EDITING", kind: "expense", idempotencyKey: state.idempotencyKey });
+    setAmount(r.totalMinor !== null ? fromMinor(r.totalMinor) : EMPTY_AMOUNT);
+    setCategoryId(r.categoryId);
+    setNote(r.noteText ?? "");
+  }
+
+  // A quick-entry card (purchase / credit record) saved through an existing
+  // endpoint: announce it and close, exactly like a normal capture.
+  function quickRecorded(message: string) {
+    toast.show({ message });
+    handleClose();
   }
 
   const submit = useCallback(async () => {
@@ -261,11 +284,19 @@ export function CaptureSheet({
             </div>
           ) : null}
 
-          {/* Quick sale entry (sale only): type or speak → interpret → the form
-              below becomes the editable confirmation preview. */}
-          {kind === "sale" ? (
-            <QuickEntry products={products.data ?? []} customers={customers.data ?? []} onApply={applyInterpreted} />
-          ) : null}
+          {/* Quick entry (both kinds): type or speak → interpret → route. Sales
+              and expenses fill the form below (the editable confirmation
+              preview); purchases and credit records confirm inline. */}
+          <QuickEntry
+            products={products.data ?? []}
+            customers={customers.data ?? []}
+            suppliers={suppliers.data ?? []}
+            categories={categories.data ?? []}
+            recentTransactions={recentTx.data ?? []}
+            onApplySale={applyInterpreted}
+            onApplyExpense={applyInterpretedExpense}
+            onRecorded={quickRecorded}
+          />
 
           <AmountKeypad
             value={amount}

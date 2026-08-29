@@ -1,16 +1,25 @@
-// Natural-language sale interpreter — DETERMINISTIC input assistance (no AI, no
-// guessing). Parses English / Krio / mixed phrases like:
-//   "Sold 3 bags of rice at Le 350 each"
-//   "Customer bought 5 bags of rice, paid 1,750"
-//   "Ah sell tri bag rice fo tri ondred en fifti each"
-// into a DRAFT that pre-fills the existing capture sheet. Safety rules:
-//   - Never invent a product, price, quantity, or payment status: everything is
-//     either stated in the text, matched against the business's own records, or
-//     flagged as an issue for the owner to resolve.
-//   - The draft is never saved directly — it fills the normal capture form, the
-//     owner reviews/edits, and recording goes through the EXISTING sale path
-//     (server-validated, idempotent). This module computes no financial truth;
-//     like the product-chip prefill, the server re-validates everything.
+// Natural-language record interpreter — DETERMINISTIC understanding + validation
+// (no LLM, no guessing; per the project's law the app computes truth, AI only
+// ever explains it — and this layer is the app). Parses English / Krio / mixed
+// phrases and works out WHAT the owner means, WHERE it belongs, and WHETHER it
+// looks right:
+//   "Sold 5 bags of rice at 350 each"        → sale
+//   "Bought 20 bags of rice for 300 each"    → purchase (stock in + expense)
+//   "Paid 100,000 for transport"             → expense (category matched)
+//   "Aminata owes me 50,000"                 → receivable (credit record)
+//   "Rice 350"                                → ambiguous — ASK, never guess
+// Safety rules:
+//   - Never invent a product, price, quantity, customer, or payment status:
+//     everything is stated in the text, matched against the business's OWN
+//     records, or raised as an issue for the owner to resolve.
+//   - Issues carry a severity: "block" (record cannot be saved until resolved)
+//     or "warn" (unusual but possibly intentional — the owner may confirm
+//     anyway; we never auto-reject their numbers).
+//   - Validation uses existing business data (catalogue prices, live stock,
+//     recent transactions) but never overrides what the owner confirmed.
+//   - Nothing is saved from here — the interpretation fills the normal capture
+//     UI as an editable confirmation preview, and recording goes through the
+//     EXISTING endpoints (server-validated, idempotent).
 // Pure module: no React, no API calls — fully unit-testable.
 
 export interface InterpretProduct {
@@ -18,51 +27,101 @@ export interface InterpretProduct {
   name: string;
   selling_price: { amount_minor: number };
   track_inventory: boolean;
+  stock?: number; // live stock, when known — enables the low-stock warning
+  cost_price?: { amount_minor: number }; // enables purchase-cost fallback/validation
 }
 
-export interface InterpretCustomer {
+export interface InterpretParty {
+  id: string;
+  name: string;
+}
+export type InterpretCustomer = InterpretParty;
+
+export interface InterpretCategory {
   id: string;
   name: string;
 }
 
+export interface InterpretRecentTx {
+  type: "INCOME" | "EXPENSE";
+  amount_minor: number;
+  occurred_at: string; // ISO
+}
+
+export interface InterpretContext {
+  products: InterpretProduct[];
+  customers: InterpretParty[];
+  suppliers?: InterpretParty[];
+  expenseCategories?: InterpretCategory[];
+  recentTransactions?: InterpretRecentTx[];
+  now?: Date; // injectable for tests
+}
+
+export type EntryIntent = "sale" | "purchase" | "expense" | "receivable" | "payable";
+
+export type IssueSeverity = "block" | "warn";
+
 export type InterpretIssueId =
-  | "notUnderstood" // nothing sale-like found — do not apply anything
+  | "notUnderstood" // nothing record-like found — do not apply anything
+  | "ambiguousIntent" // could be a sale or a purchase — ask, never guess
   | "missingAmount" // no total could be determined from the text
-  | "missingQuantity" // price given per-unit but no quantity stated
-  | "checkQuantity" // product named without a quantity — defaulted to 1, confirm
-  | "usedCatalogPrice" // no price in text — used the product's own set price, confirm
+  | "missingQuantity" // per-unit price but no quantity stated
+  | "checkQuantity" // product named without quantity — defaulted to 1, confirm
+  | "usedCatalogPrice" // no price in text — used the product's own set price
+  | "usedCatalogCost" // no cost in text — used the product's own cost price
   | "conflictTotal" // stated total ≠ quantity × unit price — owner must decide
   | "unknownProduct" // text names a product that is not in the records
+  | "productRequired" // a purchase must point at a real product
   | "ambiguousProduct" // more than one product matches — owner must pick
   | "ambiguousCustomer" // more than one customer matches — owner must pick
-  | "needCustomer" // credit sale but no customer identified
-  | "unclearNumbers"; // extra numbers we could not place — check the amounts
+  | "needCustomer" // credit record but no customer identified
+  | "needSupplier" // owing a supplier but no supplier identified
+  | "unusualPrice" // price far from the business's own recorded price
+  | "insufficientStock" // sale quantity exceeds what stock says is left
+  | "possibleDuplicate" // same amount recorded minutes ago
+  | "unclearNumbers"; // extra numbers we could not place
 
 export interface InterpretIssue {
   id: InterpretIssueId;
+  severity: IssueSeverity;
   params?: Record<string, string>;
 }
 
-export interface InterpretedSale {
+export interface InterpretedEntry {
   understood: boolean;
-  productId: string | null;
-  productCandidateIds: string[]; // ≥2 when ambiguous
-  productQuery: string | null; // the word(s) that looked like a product
+  intent: EntryIntent | null; // null → ambiguous, ask the owner (never guess)
+  // shared numbers
   quantity: number | null;
-  unitPriceMinor: number | null;
-  totalMinor: number | null; // whole draft amount; null = owner must enter it
+  unitPriceMinor: number | null; // sale price or purchase cost, per unit
+  totalMinor: number | null; // null = owner must supply it
+  // sale
   payment: "PAID" | "CREDIT" | "PARTIAL";
-  paidNowMinor: number | null; // for PARTIAL
+  paidNowMinor: number | null;
+  // purchase
+  paidSupplier: boolean; // false → owe the supplier (payable)
+  // matches against the business's own records
+  productId: string | null;
+  productCandidateIds: string[];
+  productQuery: string | null;
   customerId: string | null;
   customerCandidateIds: string[];
+  supplierId: string | null;
+  supplierCandidateIds: string[];
+  categoryId: string | null; // expense category
+  noteText: string | null;
   issues: InterpretIssue[];
 }
+
+// Back-compat shape for the sale-only entry point.
+export type InterpretedSale = InterpretedEntry;
 
 // ---------------------------------------------------------------------------
 // Vocabulary (English + Krio). Krio spellings vary — we accept common forms.
 // ---------------------------------------------------------------------------
 
-const SALE_VERBS = new Set(["sold", "sell", "sells", "sel", "bought", "buy", "buys", "take", "tek"]);
+const SALE_VERBS = new Set(["sold", "sell", "sells", "sel", "tek", "take"]);
+const BUY_VERBS = new Set(["bought", "buy", "buys", "purchase", "purchased", "restock", "restocked", "order", "ordered", "bay", "bai"]);
+const SPEND_VERBS = new Set(["spent", "spend"]);
 
 const UNIT_WORDS = new Set([
   "bag", "bags", "piece", "pieces", "pcs", "pc", "kg", "kilo", "kilos",
@@ -74,10 +133,11 @@ const UNIT_WORDS = new Set([
 const EACH_WORDS = new Set(["each", "apiece", "per"]);
 const AT_WORDS = new Set(["at", "@"]);
 const TOTAL_WORDS = new Set(["total", "altogether", "all"]);
-const SKIP_WORDS = new Set(["of", "the", "a", "di", "dem", "den", "im", "i", "we", "customer", "ah", "and", "en", "an"]);
+const SKIP_WORDS = new Set(["of", "the", "a", "di", "dem", "den", "im", "i", "we", "customer", "ah", "and", "en", "an", "from", "to", "me", "mi"]);
 
-// Credit ("owes you") markers — incl. Krio "trust" (buy on credit) and "owe".
+// Credit ("owes") markers — incl. Krio "trust" (buy on credit).
 const CREDIT_WORDS = new Set(["credit", "owe", "owes", "owing", "trust", "trusts", "later"]);
+const OWE_WORDS = new Set(["owe", "owes", "owing"]);
 const PAID_WORDS = new Set(["paid", "cash"]);
 
 // Number words. One combined map — mixed English/Krio phrases are common.
@@ -129,8 +189,10 @@ function rawWords(text: string): string[] {
   if (!lowered) return [];
   return lowered
     .split(/\s+/)
+    // sentence punctuation clings to words ("2,000." / ".rice") — strip it
+    .map((w) => w.replace(/^\.+|\.+$/g, ""))
     // currency markers carry no information (amounts are in Leones)
-    .filter((w) => w !== "le" && w !== "leone" && w !== "leones" && w !== "sle" && w !== "nle" && w !== ".");
+    .filter((w) => w !== "" && w !== "le" && w !== "leone" && w !== "leones" && w !== "sle" && w !== "nle");
 }
 
 // Krio "fo" is both "four" and "for". Deterministic rule:
@@ -156,8 +218,7 @@ function tokenize(text: string, nounTokens: Set<string>): Tok[] {
   let i = 0;
   while (i < words.length) {
     const w = words[i];
-    if (w === "__four__") {
-      // A resolved Krio "fo" (=4) can still lead a word-number run: "fo ondred" = 400.
+    if (w === "__four__" || isNumberWord(w)) {
       const [value, consumed] = readNumberRun(words, i);
       toks.push({ kind: "num", value });
       i += consumed;
@@ -166,12 +227,6 @@ function tokenize(text: string, nounTokens: Set<string>): Tok[] {
     if (isDigits(w)) {
       toks.push({ kind: "num", value: Number(w) });
       i += 1;
-      continue;
-    }
-    if (isNumberWord(w)) {
-      const [value, consumed] = readNumberRun(words, i);
-      toks.push({ kind: "num", value });
-      i += consumed;
       continue;
     }
     toks.push({ kind: "word", text: w });
@@ -230,59 +285,87 @@ function nameTokens(name: string): string[] {
     .filter((t) => t.length >= 3 && !UNIT_WORDS.has(t) && !/^\d/.test(t));
 }
 
-export function productNounTokens(products: InterpretProduct[], customers: InterpretCustomer[]): Set<string> {
+export function productNounTokens(products: InterpretProduct[], parties: InterpretParty[]): Set<string> {
   const set = new Set<string>();
   for (const p of products) for (const t of nameTokens(p.name)) set.add(t);
-  for (const c of customers) for (const t of nameTokens(c.name)) set.add(t);
+  for (const c of parties) for (const t of nameTokens(c.name)) set.add(t);
   return set;
 }
 
+function matchParties(parties: InterpretParty[], wordSet: Set<string>): InterpretParty[] {
+  return parties.filter((p) => nameTokens(p.name).some((t) => wordSet.has(t)));
+}
+
 const toMinorUnits = (wholeLeones: number): number => Math.round(wholeLeones * 100);
+
+const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
+const UNUSUAL_HIGH = 1.5; // ≥150% of the recorded price
+const UNUSUAL_LOW = 0.5; // ≤50% of the recorded price
 
 // ---------------------------------------------------------------------------
 // The interpreter.
 // ---------------------------------------------------------------------------
 
-export function interpretSale(
+export function interpretEntry(
   text: string,
-  products: InterpretProduct[],
-  customers: InterpretCustomer[],
-): InterpretedSale {
+  ctx: InterpretContext,
+  forcedIntent?: EntryIntent,
+): InterpretedEntry {
+  const products = ctx.products;
+  const customers = ctx.customers;
+  const suppliers = ctx.suppliers ?? [];
+  const categories = ctx.expenseCategories ?? [];
+
   const issues: InterpretIssue[] = [];
-  const nouns = productNounTokens(products, customers);
+  const block = (id: InterpretIssueId, params?: Record<string, string>) => issues.push({ id, severity: "block", params });
+  const warn = (id: InterpretIssueId, params?: Record<string, string>) => issues.push({ id, severity: "warn", params });
+
+  const nouns = productNounTokens(products, [...customers, ...suppliers]);
   const toks = tokenize(text, nouns);
   const wordSet = new Set(toks.filter((t): t is { kind: "word"; text: string } => t.kind === "word").map((t) => t.text));
+  const bigrams: string[] = [];
+  for (let i = 0; i < toks.length - 1; i += 1) {
+    const a = toks[i];
+    const b = toks[i + 1];
+    if (a.kind === "word" && b.kind === "word") bigrams.push(`${a.text} ${b.text}`);
+  }
 
-  // ---- customers -----------------------------------------------------------
-  const customerMatches = customers.filter((c) => nameTokens(c.name).some((t) => wordSet.has(t)));
-  let customerId: string | null = null;
+  // ---- parties -------------------------------------------------------------
+  const customerMatches = matchParties(customers, wordSet);
+  let customerId: string | null = customerMatches.length === 1 ? customerMatches[0].id : null;
   const customerCandidateIds = customerMatches.map((c) => c.id);
-  if (customerMatches.length === 1) customerId = customerMatches[0].id;
-  else if (customerMatches.length > 1) issues.push({ id: "ambiguousCustomer" });
+  if (customerMatches.length > 1) warn("ambiguousCustomer");
+
+  const supplierMatches = matchParties(suppliers, wordSet);
+  const supplierId: string | null = supplierMatches.length === 1 ? supplierMatches[0].id : null;
+  const supplierCandidateIds = supplierMatches.map((s) => s.id);
 
   // ---- products ------------------------------------------------------------
-  const customerTokens = new Set(customers.flatMap((c) => nameTokens(c.name)));
+  const partyTokens = new Set([...customers, ...suppliers].flatMap((c) => nameTokens(c.name)));
   const scored = products
-    .map((p) => ({ p, score: nameTokens(p.name).filter((t) => wordSet.has(t) && !customerTokens.has(t)).length }))
+    .map((p) => ({ p, score: nameTokens(p.name).filter((t) => wordSet.has(t) && !partyTokens.has(t)).length }))
     .filter((s) => s.score > 0);
-  const best = Math.max(0, ...scored.map((s) => s.score));
-  const winners = scored.filter((s) => s.score === best);
-  let productId: string | null = null;
-  let productCandidateIds: string[] = [];
-  let productQuery: string | null = null;
+  const bestScore = Math.max(0, ...scored.map((s) => s.score));
+  const winners = scored.filter((s) => s.score === bestScore);
   const matchedProduct = winners.length === 1 ? winners[0].p : null;
-  if (matchedProduct) {
-    productId = matchedProduct.id;
-  } else if (winners.length > 1) {
-    productCandidateIds = winners.map((s) => s.p.id);
-    issues.push({ id: "ambiguousProduct" });
-  }
+  let productId: string | null = matchedProduct ? matchedProduct.id : null;
+  const productCandidateIds = winners.length > 1 ? winners.map((s) => s.p.id) : [];
+  let productQuery: string | null = null;
+
+  // ---- expense category match ---------------------------------------------
+  const catScored = categories
+    .map((c) => ({
+      c,
+      score: nameTokens(c.name).filter((t) => t !== "expense" && t !== "general" && wordSet.has(t)).length,
+    }))
+    .filter((s) => s.score > 0);
+  const matchedCategory = catScored.length >= 1 ? catScored[0].c : null;
 
   // ---- numbers: assign roles ----------------------------------------------
   let quantity: number | null = null;
-  let unitPrice: number | null = null; // whole leones
-  let statedTotal: number | null = null; // whole leones
-  let paidAmount: number | null = null; // whole leones
+  let unitPrice: number | null = null; // whole leones (price for sale, cost for purchase)
+  let statedTotal: number | null = null;
+  let paidAmount: number | null = null;
   const leftovers: number[] = [];
 
   const wordAt = (i: number): string | null => {
@@ -316,7 +399,7 @@ export function interpretSale(
     } else if (next !== null && TOTAL_WORDS.has(next)) {
       if (statedTotal === null) statedTotal = t.value;
       else leftovers.push(t.value);
-    } else if (prev !== null && SALE_VERBS.has(prev) && isInt && t.value > 0 && t.value <= 9999) {
+    } else if (prev !== null && (SALE_VERBS.has(prev) || BUY_VERBS.has(prev)) && isInt && t.value > 0 && t.value <= 9999) {
       if (quantity === null) quantity = t.value;
       else leftovers.push(t.value);
     } else {
@@ -327,36 +410,77 @@ export function interpretSale(
   // One unplaced number with no explicit total → it is the stated total
   // (still shown for confirmation, never silently saved).
   if (statedTotal === null && leftovers.length === 1) statedTotal = leftovers.shift() ?? null;
-  if (leftovers.length > 0) issues.push({ id: "unclearNumbers" });
+  if (leftovers.length > 0) warn("unclearNumbers");
 
-  // ---- payment status ------------------------------------------------------
-  const bigrams: string[] = [];
-  for (let i = 0; i < toks.length - 1; i += 1) {
-    const a = toks[i];
-    const b = toks[i + 1];
-    if (a.kind === "word" && b.kind === "word") bigrams.push(`${a.text} ${b.text}`);
-  }
+  // ---- payment / credit markers -------------------------------------------
   const creditStated =
     [...wordSet].some((w) => CREDIT_WORDS.has(w)) ||
     bigrams.some((b) => ["no pay", "nor pay", "not paid", "pay later", "go pay", "never pay", "on credit", "for credit"].includes(b));
 
-  // ---- did we understand anything? ----------------------------------------
-  const sawVerb = [...wordSet].some((w) => SALE_VERBS.has(w));
+  // ---- intent (never guessed: ambiguous → ask) ----------------------------
+  const sawSaleVerb = [...wordSet].some((w) => SALE_VERBS.has(w));
+  const sawBuyVerb = [...wordSet].some((w) => BUY_VERBS.has(w));
+  const sawSpendVerb = [...wordSet].some((w) => SPEND_VERBS.has(w));
+  const sawOwe = [...wordSet].some((w) => OWE_WORDS.has(w));
+  const sawPaidWord = [...wordSet].some((w) => PAID_WORDS.has(w) || w === "pay");
+  const customerish = wordSet.has("customer") || customerMatches.length > 0;
+  const iOwe = bigrams.some((b) => ["i owe", "a owe", "we owe", "ah owe"].includes(b));
+
+  let detectedIntent: EntryIntent | null = null;
+  if (sawSaleVerb) detectedIntent = "sale";
+  else if (sawBuyVerb) detectedIntent = customerish ? "sale" : "purchase";
+  else if (sawOwe) detectedIntent = iOwe || (supplierMatches.length > 0 && customerMatches.length === 0) ? "payable" : "receivable";
+  else if (sawSpendVerb) detectedIntent = "expense";
+  else if (sawPaidWord && wordSet.has("for")) detectedIntent = customerish ? "sale" : matchedProduct || productCandidateIds.length > 0 ? "purchase" : "expense";
+  else if (matchedCategory && !matchedProduct && productCandidateIds.length === 0) detectedIntent = "expense";
+  // else null — e.g. "Rice 350": sale or purchase? ask.
+
+  // A forced intent (the owner answered our question) never makes gibberish
+  // "understood" — understanding is judged on the text alone.
   const sawNumber = toks.some((t) => t.kind === "num");
-  const understood = sawVerb || sawNumber || productId !== null || productCandidateIds.length > 0;
-  if (!understood) {
+  const understood =
+    detectedIntent !== null || sawNumber || productId !== null || productCandidateIds.length > 0 || customerMatches.length > 0;
+  const intent: EntryIntent | null = forcedIntent ?? detectedIntent;
+
+  const emptyResult = (only: InterpretIssue[]): InterpretedEntry => ({
+    understood: false,
+    intent: null,
+    quantity: null, unitPriceMinor: null, totalMinor: null,
+    payment: "PAID", paidNowMinor: null, paidSupplier: true,
+    productId: null, productCandidateIds: [], productQuery: null,
+    customerId: null, customerCandidateIds: [],
+    supplierId: null, supplierCandidateIds: [],
+    categoryId: null, noteText: null,
+    issues: only,
+  });
+
+  if (!understood) return emptyResult([{ id: "notUnderstood", severity: "block" }]);
+
+  if (intent === null) {
+    // Something record-like, but we cannot tell sale from purchase. ASK.
+    block("ambiguousIntent");
     return {
-      understood: false,
-      productId: null, productCandidateIds: [], productQuery: null,
-      quantity: null, unitPriceMinor: null, totalMinor: null,
-      payment: "PAID", paidNowMinor: null,
-      customerId: null, customerCandidateIds: [],
-      issues: [{ id: "notUnderstood" }],
+      ...emptyResult(issues),
+      understood: true,
+      quantity,
+      unitPriceMinor: unitPrice !== null ? toMinorUnits(unitPrice) : null,
+      totalMinor: null,
+      productId,
+      productCandidateIds,
+      customerId,
+      customerCandidateIds,
+      supplierId,
+      supplierCandidateIds,
+      issues,
     };
   }
 
-  // ---- unknown product: quantity+unit present but nothing matched ---------
-  if (productId === null && productCandidateIds.length === 0) {
+  // ---- ambiguous / unknown product ----------------------------------------
+  if (productCandidateIds.length > 1) {
+    issues.push({ id: "ambiguousProduct", severity: intent === "purchase" ? "block" : "warn" });
+  }
+  if (productId === null && productCandidateIds.length === 0 && (intent === "sale" || intent === "purchase")) {
+    // quantity+unit present but nothing matched → surface the word we saw
     for (let i = 0; i < toks.length; i += 1) {
       const t = toks[i];
       if (t.kind !== "word" || !UNIT_WORDS.has(t.text)) continue;
@@ -364,88 +488,180 @@ export function interpretSale(
         const cand = toks[j];
         if (cand.kind !== "word") break;
         if (SKIP_WORDS.has(cand.text)) continue;
-        if (!nouns.has(cand.text) && !UNIT_WORDS.has(cand.text) && !isNumberWord(cand.text) && !customerTokens.has(cand.text)
+        if (!nouns.has(cand.text) && !UNIT_WORDS.has(cand.text) && !isNumberWord(cand.text) && !partyTokens.has(cand.text)
             && !EACH_WORDS.has(cand.text) && !AT_WORDS.has(cand.text) && cand.text !== "for" && !PAID_WORDS.has(cand.text) && !CREDIT_WORDS.has(cand.text)) {
           productQuery = cand.text;
-          issues.push({ id: "unknownProduct", params: { name: cand.text } });
+          warn("unknownProduct", { name: cand.text });
         }
         break;
       }
       if (productQuery) break;
     }
   }
+  if (intent === "purchase" && matchedProduct === null) {
+    // Stock can only come in against a real product — no inventing one.
+    block("productRequired");
+  }
 
   // ---- reconcile amounts (deterministic arithmetic on stated numbers) -----
   let totalMinor: number | null = null;
   let unitPriceMinor: number | null = unitPrice !== null ? toMinorUnits(unitPrice) : null;
 
-  if (unitPrice !== null && quantity !== null) {
-    const computed = toMinorUnits(unitPrice * quantity);
-    const stated = statedTotal !== null ? toMinorUnits(statedTotal) : null;
-    if (stated !== null && stated !== computed) {
-      issues.push({ id: "conflictTotal", params: { computed: String(unitPrice * quantity), stated: String(statedTotal) } });
-      totalMinor = null; // owner must decide — never guess between two stated numbers
-    } else {
-      totalMinor = computed;
+  if (intent === "sale" || intent === "purchase") {
+    if (unitPrice !== null && quantity !== null) {
+      const computed = toMinorUnits(unitPrice * quantity);
+      const stated = statedTotal !== null ? toMinorUnits(statedTotal) : null;
+      if (stated !== null && stated !== computed) {
+        block("conflictTotal", { computed: String(unitPrice * quantity), stated: String(statedTotal) });
+        totalMinor = null; // owner must decide — never guess between two stated numbers
+      } else {
+        totalMinor = computed;
+      }
+    } else if (unitPrice !== null && quantity === null) {
+      block("missingQuantity");
+      totalMinor = statedTotal !== null ? toMinorUnits(statedTotal) : null;
+    } else if (statedTotal !== null) {
+      totalMinor = toMinorUnits(statedTotal);
+    } else if (paidAmount !== null && !creditStated) {
+      totalMinor = toMinorUnits(paidAmount);
     }
-  } else if (unitPrice !== null && quantity === null) {
-    issues.push({ id: "missingQuantity" });
-    totalMinor = statedTotal !== null ? toMinorUnits(statedTotal) : null;
-  } else if (statedTotal !== null) {
-    totalMinor = toMinorUnits(statedTotal);
-  } else if (paidAmount !== null && !creditStated) {
-    totalMinor = toMinorUnits(paidAmount);
-  }
 
-  // Product named but no price anywhere in the text → offer the product's OWN
-  // configured price (same as tapping its chip), clearly flagged for review.
-  if (matchedProduct && totalMinor === null && unitPrice === null && statedTotal === null && paidAmount === null) {
-    const qty = quantity ?? 1;
-    unitPriceMinor = matchedProduct.selling_price.amount_minor;
-    totalMinor = unitPriceMinor * qty;
-    issues.push({ id: "usedCatalogPrice" });
-  }
+    if (intent === "sale") {
+      // Product named but no price anywhere → offer the product's OWN set price
+      // (same as tapping its chip), clearly flagged for review.
+      if (matchedProduct && totalMinor === null && unitPrice === null && statedTotal === null && paidAmount === null) {
+        const qty = quantity ?? 1;
+        unitPriceMinor = matchedProduct.selling_price.amount_minor;
+        totalMinor = unitPriceMinor * qty;
+        warn("usedCatalogPrice");
+      }
+      // Product named without a quantity, but the amount is known → default 1
+      // like the manual flow, and say so.
+      if (matchedProduct && quantity === null && totalMinor !== null) {
+        quantity = 1;
+        if (!issues.some((x) => x.id === "missingQuantity")) warn("checkQuantity");
+      }
+    }
 
-  // Product named without a quantity, but the amount is known → default 1 like
-  // the manual flow, and say so. (When the amount hinges on the quantity, we ask
-  // instead — see missingQuantity above — rather than defaulting.)
-  if (matchedProduct && quantity === null && totalMinor !== null) {
-    quantity = 1;
-    if (!issues.some((x) => x.id === "missingQuantity")) issues.push({ id: "checkQuantity" });
+    if (intent === "purchase" && matchedProduct) {
+      if (quantity === null && !issues.some((x) => x.id === "missingQuantity")) block("missingQuantity");
+      // No cost stated → fall back to the product's own recorded cost, flagged.
+      if (unitPriceMinor === null && totalMinor === null && matchedProduct.cost_price) {
+        unitPriceMinor = matchedProduct.cost_price.amount_minor;
+        if (quantity !== null) totalMinor = unitPriceMinor * quantity;
+        warn("usedCatalogCost");
+      }
+      // Unit cost derivable from a stated total.
+      if (unitPriceMinor === null && totalMinor !== null && quantity !== null && totalMinor % quantity === 0) {
+        unitPriceMinor = totalMinor / quantity;
+      }
+    }
+  } else if (intent === "expense" || intent === "receivable" || intent === "payable") {
+    const single = paidAmount ?? statedTotal;
+    totalMinor = single !== null ? toMinorUnits(single) : null;
   }
 
   if (totalMinor === null && !issues.some((x) => x.id === "conflictTotal" || x.id === "missingQuantity")) {
-    issues.push({ id: "missingAmount" });
+    block("missingAmount");
   }
   if (totalMinor !== null && (totalMinor <= 0 || totalMinor > 100_000_000_000)) {
     totalMinor = null;
-    issues.push({ id: "missingAmount" });
+    block("missingAmount");
+  }
+
+  // ---- validation against the business's OWN records ----------------------
+  // Unusual price/cost (only when the owner stated one — never against fallbacks).
+  if (matchedProduct && unitPrice !== null) {
+    const usualMinor = intent === "purchase" ? matchedProduct.cost_price?.amount_minor : matchedProduct.selling_price.amount_minor;
+    const enteredMinor = toMinorUnits(unitPrice);
+    if (usualMinor && usualMinor > 0) {
+      const ratio = enteredMinor / usualMinor;
+      if (ratio >= UNUSUAL_HIGH || ratio <= UNUSUAL_LOW) {
+        warn("unusualPrice", {
+          product: matchedProduct.name,
+          usual: String(Math.round(usualMinor / 100)),
+          entered: String(unitPrice),
+        });
+      }
+    }
+  }
+  // Selling more than stock says is left (owner may still confirm — shops are messy).
+  if (intent === "sale" && matchedProduct?.track_inventory && typeof matchedProduct.stock === "number" && quantity !== null && quantity > matchedProduct.stock) {
+    warn("insufficientStock", { have: String(matchedProduct.stock) });
+  }
+  // Same amount recorded minutes ago → possible duplicate (confirm anyway allowed).
+  if (totalMinor !== null && ctx.recentTransactions && ctx.recentTransactions.length > 0) {
+    const now = (ctx.now ?? new Date()).getTime();
+    const wantType = intent === "sale" || intent === "receivable" ? "INCOME" : "EXPENSE";
+    const dup = ctx.recentTransactions.some(
+      (tx) => tx.type === wantType && tx.amount_minor === totalMinor && now - new Date(tx.occurred_at).getTime() < DUPLICATE_WINDOW_MS && now - new Date(tx.occurred_at).getTime() >= 0,
+    );
+    if (dup) warn("possibleDuplicate");
   }
 
   // ---- payment resolution --------------------------------------------------
   let payment: "PAID" | "CREDIT" | "PARTIAL" = "PAID";
   let paidNowMinor: number | null = null;
+  let paidSupplier = true;
   const paidMinor = paidAmount !== null ? toMinorUnits(paidAmount) : null;
-  if (creditStated) {
-    if (paidMinor !== null && totalMinor !== null && paidMinor >= totalMinor) payment = "PAID";
-    else if (paidMinor !== null && paidMinor > 0) {
+
+  if (intent === "sale") {
+    if (creditStated) {
+      if (paidMinor !== null && totalMinor !== null && paidMinor >= totalMinor) payment = "PAID";
+      else if (paidMinor !== null && paidMinor > 0) {
+        payment = "PARTIAL";
+        paidNowMinor = paidMinor;
+      } else payment = "CREDIT";
+    } else if (paidMinor !== null && totalMinor !== null && paidMinor < totalMinor) {
       payment = "PARTIAL";
       paidNowMinor = paidMinor;
-    } else payment = "CREDIT";
-  } else if (paidMinor !== null && totalMinor !== null && paidMinor < totalMinor) {
-    payment = "PARTIAL";
-    paidNowMinor = paidMinor;
+    }
+    if ((payment === "CREDIT" || payment === "PARTIAL") && customerId === null) block("needCustomer");
   }
-  if ((payment === "CREDIT" || payment === "PARTIAL") && customerId === null) {
-    issues.push({ id: "needCustomer" });
+  if (intent === "purchase") {
+    paidSupplier = !creditStated;
+    if (!paidSupplier && supplierId === null) block("needSupplier");
+  }
+  if (intent === "receivable" && customerId === null) block("needCustomer");
+  if (intent === "payable" && supplierId === null) block("needSupplier");
+
+  // ---- expense extras ------------------------------------------------------
+  let categoryId: string | null = null;
+  let noteText: string | null = null;
+  if (intent === "expense") {
+    categoryId = matchedCategory?.id ?? null;
+    // description: the words after "for/on" when they aren't just the category
+    const m = /(?:for|on)\s+(.{2,60})$/i.exec(text.trim());
+    if (m) {
+      const tail = m[1].replace(/[.,;!?]+$/, "").trim();
+      const isJustCategory = matchedCategory ? tail.toLowerCase() === matchedCategory.name.toLowerCase() : false;
+      if (tail && !isJustCategory && !/^\d[\d,. ]*$/.test(tail)) noteText = tail;
+    }
   }
 
   return {
     understood: true,
-    productId, productCandidateIds, productQuery,
+    intent,
     quantity, unitPriceMinor, totalMinor,
-    payment, paidNowMinor,
+    payment, paidNowMinor, paidSupplier,
+    productId, productCandidateIds, productQuery,
     customerId, customerCandidateIds,
+    supplierId, supplierCandidateIds,
+    categoryId, noteText,
     issues,
   };
+}
+
+// Back-compat sale-only entry point (used by earlier tests): interpret with the
+// intent fixed to "sale".
+export function interpretSale(
+  text: string,
+  products: InterpretProduct[],
+  customers: InterpretParty[],
+): InterpretedEntry {
+  return interpretEntry(text, { products, customers }, "sale");
+}
+
+export function hasBlockingIssues(r: InterpretedEntry): boolean {
+  return r.issues.some((i) => i.severity === "block");
 }

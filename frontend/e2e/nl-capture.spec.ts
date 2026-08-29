@@ -156,3 +156,137 @@ test("duplicate submission: double-press records exactly one sale", async ({ pag
   await page.getByRole("tab", { name: "In", exact: true }).click();
   await expect(page.getByTestId("record-card").filter({ hasText: "Le 777" })).toHaveCount(1);
 });
+
+// ---------------------------------------------------------------------------
+// Record interpretation & validation layer (feature brief 2)
+// ---------------------------------------------------------------------------
+
+test("expense routing: 'Paid 100,000 for transport' switches to the expense form, category matched", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Paid 100,000 for transport");
+  await page.getByTestId("nlc-fill").click();
+  // The sheet re-routes itself to the expense form…
+  await expect(page.getByRole("heading", { name: "Money out · Expense" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Transport" })).toBeChecked();
+  await expect(page.getByTestId("amount-display")).toContainText("100,000");
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 100,000");
+
+  await page.getByRole("link", { name: "Money" }).click();
+  await page.getByRole("tab", { name: "Out", exact: true }).click();
+  await expect(page.getByTestId("record-card").filter({ hasText: "Le 100,000" }).first()).toBeVisible();
+});
+
+test("purchase routing: 'Bought 10 bags of rice at 300 each' → stock in via the existing endpoint", async ({ page }) => {
+  await signIn(page);
+
+  await page.getByRole("link", { name: "Stock" }).click();
+  const riceRow = page.getByTestId("product-row").filter({ hasText: "Rice (50kg bag)" });
+  const beforeText = await riceRow.getByText(/\d+ left/).textContent();
+  const before = Number(/(\d+)/.exec(beforeText ?? "")?.[1]);
+  await page.getByRole("link", { name: "Home" }).click();
+
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Bought 10 bags of rice at 70,000 each");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-purchase-card")).toBeVisible();
+  await expect(page.getByTestId("nlc-purchase-qty")).toHaveValue("10");
+  await expect(page.getByTestId("nlc-purchase-cost")).toHaveValue("70000");
+  await page.getByTestId("nlc-purchase-record").click();
+  await expect(page.getByTestId("toast")).toContainText("Added 10 · Rice (50kg bag)");
+
+  await page.getByRole("link", { name: "Stock" }).click();
+  await expect(riceRow.getByText(`${before + 10} left`)).toBeVisible();
+});
+
+test("credit record routing: 'Aminata owes me 50,000' → receivable via the existing endpoint", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Isatu owes me 50,000");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-debt-card")).toContainText("Isatu owes you");
+  await expect(page.getByTestId("nlc-debt-card")).toContainText("Le 50,000");
+  await page.getByTestId("nlc-debt-record").click();
+  await expect(page.getByTestId("toast")).toContainText("Debt recorded · Le 50,000");
+
+  await page.getByRole("link", { name: "Money" }).click();
+  await page.getByRole("tab", { name: "Owed to you" }).click();
+  await expect(page.getByTestId("debt-card").filter({ hasText: "Isatu" }).filter({ hasText: "Le 50,000" })).toBeVisible();
+});
+
+test("ambiguous 'Rice 350' asks sale-or-purchase and never guesses", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Rice 350");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-summary")).toContainText("Is this a sale or a purchase?");
+  await expect(page.getByTestId("capture-save")).toBeDisabled(); // nothing committed while unresolved
+  await page.getByTestId("nlc-intent-sale").click();
+  await expect(page.getByTestId("amount-display")).toContainText("350");
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 350");
+});
+
+test("unusual price warns with the business's own price but allows confirm-anyway", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Sold 2 bags of rice at 700 each");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-summary")).toContainText("usually around");
+  await expect(page.getByTestId("capture-save")).toBeEnabled(); // warning, not rejection
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 1,400");
+});
+
+test("insufficient stock warns with what the records say is left", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Sold 500 bags of rice at 350 each");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-summary")).toContainText("left in stock");
+  await expect(page.getByTestId("capture-save")).toBeEnabled();
+});
+
+test("owner edits the interpretation before confirming (quantity stepper keeps the spoken price)", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Sold 3 bags of rice at 350 each");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("amount-display")).toContainText("1,050");
+  await page.getByRole("button", { name: "+" }).click(); // 3 → 4, at the SPOKEN Le 350
+  await expect(page.getByTestId("amount-display")).toContainText("1,400");
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 1,400");
+});
+
+test("owner cancels: interpreted record is discarded, nothing is saved", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("sold 1 bag of rice at 1313 each");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("amount-display")).toContainText("1,313");
+  await page.keyboard.press("Escape"); // dirty sheet → discard confirmation
+  await page.getByRole("button", { name: "Discard" }).click();
+
+  await page.getByRole("link", { name: "Money" }).click();
+  await page.getByRole("tab", { name: "In", exact: true }).click();
+  await expect(page.getByTestId("record-card").filter({ hasText: "Le 1,313" })).toHaveCount(0);
+});
+
+test("possible duplicate: same amount minutes later warns but still allows a real second sale", async ({ page }) => {
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("sold 2 bar soap at 250 each");
+  await page.getByTestId("nlc-fill").click();
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 500");
+
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("sold 2 bar soap at 250 each");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-summary")).toContainText("a few minutes ago");
+  await expect(page.getByTestId("capture-save")).toBeEnabled(); // confirm-anyway
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 500");
+});
