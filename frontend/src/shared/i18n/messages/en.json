@@ -325,5 +325,9 @@
   "trends.improving": "Improving",
   "trends.declining": "Declining",
   "trends.stable": "Stable",
-  "trends.notEnoughData": "Not enough history yet"
+  "trends.notEnoughData": "Not enough history yet",
+  "nlc.micDenied": "The browser is blocking the microphone. Allow mic access for this site (padlock icon in the address bar), then try again.",
+  "nlc.micNetwork": "Speech recognition couldn't reach the internet. It needs a connection — and works best in Chrome or Edge (some browsers, like Brave, don't support it). You can still type the sale.",
+  "nlc.micNoDevice": "No microphone was found on this device. You can still type the sale.",
+  "nlc.micError": "The microphone didn't work this time — you can still type the sale."
 }

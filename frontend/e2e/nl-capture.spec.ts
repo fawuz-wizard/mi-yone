@@ -290,3 +290,41 @@ test("possible duplicate: same amount minutes later warns but still allows a rea
   await page.getByTestId("capture-save").click();
   await expect(page.getByTestId("toast")).toContainText("Saved · Le 500");
 });
+
+test("voice failure explains the cause: blocked mic vs unreachable speech service", async ({ page }) => {
+  await page.addInitScript(() => {
+    // First click fails like a blocked mic; second like Brave/offline (network).
+    let call = 0;
+    class FailingRecognition {
+      lang = "";
+      continuous = false;
+      interimResults = false;
+      onresult: ((e: unknown) => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((e: { error: string }) => void) | null = null;
+      start() {
+        call += 1;
+        const code = call === 1 ? "not-allowed" : "network";
+        setTimeout(() => {
+          this.onerror?.({ error: code });
+          this.onend?.();
+        }, 30);
+      }
+      stop() {}
+    }
+    const w = window as unknown as Record<string, unknown>;
+    w.SpeechRecognition = FailingRecognition;
+    w.webkitSpeechRecognition = FailingRecognition;
+  });
+
+  await signIn(page);
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-mic").click();
+  await expect(page.getByTestId("nlc-mic-message")).toContainText("blocking the microphone");
+  await page.getByTestId("nlc-mic").click();
+  await expect(page.getByTestId("nlc-mic-message")).toContainText("couldn't reach the internet");
+  // The typed path is always the recovery: same phrase, same interpreter.
+  await page.getByTestId("nlc-input").fill("Ah sell three bag rice for three hundred and fifty each");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-summary")).toContainText("3 × Rice (50kg bag)");
+});

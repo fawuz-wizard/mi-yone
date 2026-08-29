@@ -24,13 +24,14 @@ import { useRecordDebt, useRecordPurchase } from "./api";
 interface SpeechAlternativeLike { transcript: string }
 interface SpeechResultLike { 0: SpeechAlternativeLike; isFinal: boolean }
 interface SpeechEventLike { results: ArrayLike<SpeechResultLike>; resultIndex: number }
+interface SpeechErrorLike { error?: string }
 interface SpeechRecognitionLike {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
   onresult: ((e: SpeechEventLike) => void) | null;
   onend: (() => void) | null;
-  onerror: (() => void) | null;
+  onerror: ((e: SpeechErrorLike) => void) | null;
   start: () => void;
   stop: () => void;
 }
@@ -71,7 +72,8 @@ export function QuickEntry({
   const [result, setResult] = useState<InterpretedEntry | null>(null);
   const [listening, setListening] = useState(false);
   const [micSupported, setMicSupported] = useState(false);
-  const [heardNothing, setHeardNothing] = useState(false);
+  // Message id explaining what went wrong with the mic (null = nothing to say).
+  const [micMessageId, setMicMessageId] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   // Detect support after mount only (SSR renders without the mic → no hydration mismatch).
@@ -100,7 +102,7 @@ export function QuickEntry({
         forced,
       );
       setResult(r);
-      setHeardNothing(false);
+      setMicMessageId(null);
       if (!r.understood) return;
       if (r.intent === "sale") onApplySale(r);
       else if (r.intent === "expense") onApplyExpense(r);
@@ -134,22 +136,37 @@ export function QuickEntry({
       }
       setText((finalText + interim).trim());
     };
+    let errored = false;
     rec.onend = () => {
       setListening(false);
       recognitionRef.current = null;
       const spoken = finalText.trim();
       if (spoken) interpret(spoken);
-      else setHeardNothing(true);
+      else if (!errored) setMicMessageId("nlc.heardNothing");
     };
-    rec.onerror = () => {
+    // Say WHAT failed — a blocked mic, an unreachable speech service, and
+    // silence are different problems with different fixes.
+    rec.onerror = (e) => {
+      errored = true;
       setListening(false);
       recognitionRef.current = null;
-      setHeardNothing(true);
+      const code = e?.error ?? "";
+      if (code === "not-allowed" || code === "service-not-allowed") setMicMessageId("nlc.micDenied");
+      else if (code === "network") setMicMessageId("nlc.micNetwork");
+      else if (code === "audio-capture") setMicMessageId("nlc.micNoDevice");
+      else if (code === "no-speech") setMicMessageId("nlc.heardNothing");
+      else setMicMessageId("nlc.micError");
     };
     recognitionRef.current = rec;
-    setHeardNothing(false);
+    setMicMessageId(null);
     setListening(true);
-    rec.start();
+    try {
+      rec.start();
+    } catch {
+      setListening(false);
+      recognitionRef.current = null;
+      setMicMessageId("nlc.micError");
+    }
   }, [interpret]);
 
   const productName = (id: string | null) => products.find((p) => p.id === id)?.name ?? null;
@@ -219,9 +236,9 @@ export function QuickEntry({
           {t("nlc.listening")}
         </p>
       ) : null}
-      {heardNothing ? (
-        <p role="status" className="mt-2 text-sm font-medium text-text-secondary">
-          {t("nlc.heardNothing")}
+      {micMessageId ? (
+        <p role="status" data-testid="nlc-mic-message" className="mt-2 text-sm font-medium text-text-secondary">
+          {t(micMessageId)}
         </p>
       ) : null}
 
