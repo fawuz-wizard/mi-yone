@@ -5,6 +5,17 @@ import { DomainError, mapApiError, networkError } from "./errors";
 
 const BASE = "/api/v1";
 
+// A stale/invalid session (e.g. a leftover cookie from another mode or an
+// expired sign-in) must never strand the owner on a dead dashboard: send them
+// to the door to sign in again. Door pages are exempt so a wrong password on
+// the sign-in screen stays an inline message, not a redirect loop.
+const DOOR_PATHS = ["/welcome", "/signin", "/signup"];
+function redirectToDoorIfSessionInvalid(err: DomainError): void {
+  if (err.kind !== "auth" || typeof window === "undefined") return;
+  if (DOOR_PATHS.some((p) => window.location.pathname.startsWith(p))) return;
+  window.location.assign("/welcome");
+}
+
 interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
@@ -33,7 +44,9 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     envelope = undefined;
   }
   if (!res.ok || !envelope?.success) {
-    throw mapApiError(res.status, envelope?.error);
+    const err = mapApiError(res.status, envelope?.error);
+    redirectToDoorIfSessionInvalid(err);
+    throw err;
   }
   return envelope.data as T;
 }
@@ -56,7 +69,9 @@ export async function apiUpload<T>(path: string, file: File | Blob, fieldName = 
     envelope = undefined;
   }
   if (!res.ok || !envelope?.success) {
-    throw mapApiError(res.status, envelope?.error);
+    const err = mapApiError(res.status, envelope?.error);
+    redirectToDoorIfSessionInvalid(err);
+    throw err;
   }
   return envelope.data as T;
 }
