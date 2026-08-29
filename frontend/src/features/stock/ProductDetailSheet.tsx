@@ -13,6 +13,7 @@ import { EMPTY_AMOUNT, fromMinor, isEmpty, toMinor, type AmountState } from "@/s
 import { useT } from "@/shared/i18n";
 import { PriceField } from "./PriceField";
 import { ProductFormSheet } from "./ProductFormSheet";
+import { QrCodeSheet } from "./QrCodeSheet";
 import { useAddStock, useProductDetail, useRemoveProductImage, useStockCheck, useSuppliers, useUpdateProduct, useUploadProductImage } from "./api";
 import { useRef } from "react";
 
@@ -35,6 +36,7 @@ export function ProductDetailSheet({ productId, onClose }: { productId: string |
   const [counted, setCounted] = useState("");
   const [reason, setReason] = useState<"COUNTED" | "DAMAGED" | "OTHER" | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
 
   if (!productId) return null;
   const product = detail.data?.product;
@@ -109,6 +111,9 @@ export function ProductDetailSheet({ productId, onClose }: { productId: string |
                   {t("stock.editProduct")}
                 </Button>
               </div>
+              <Button level="secondary" fullWidth onClick={() => setQrOpen(true)} data-testid="show-qr">
+                {t("scan.showQr")}
+              </Button>
               <Button level="tertiary" fullWidth onClick={() => setConfirmArchive(true)} data-testid="archive-product">
                 {t("stock.archive")}
               </Button>
@@ -237,6 +242,7 @@ export function ProductDetailSheet({ productId, onClose }: { productId: string |
       </BottomSheet>
 
       <ProductFormSheet open={mode === "edit"} product={product ?? null} onClose={() => setMode("detail")} />
+      {product ? <QrCodeSheet product={product} open={qrOpen} onClose={() => setQrOpen(false)} /> : null}
 
       {product ? (
         <ConfirmDialog

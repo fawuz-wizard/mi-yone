@@ -3,7 +3,7 @@
 // sale (paid / credit / partial), expense — and the same sheet pattern is reused by
 // debt payments (features/money). Idempotency key generated at OPEN.
 import { useCallback, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, Minus, Plus } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Minus, Plus, ScanLine } from "lucide-react";
 import { BottomSheet } from "@/shared/design-system/BottomSheet";
 import { AmountKeypad } from "@/shared/design-system/AmountKeypad";
 import { Button } from "@/shared/design-system/Button";
@@ -505,16 +505,31 @@ function PaymentOption({
 export function CaptureChooser({
   open,
   onChoose,
+  onScan,
   onClose,
 }: {
   open: boolean;
   onChoose: (kind: CaptureKind) => void;
+  onScan?: () => void;
   onClose: () => void;
 }) {
   const t = useT();
   return (
     <BottomSheet open={open} title={t("nav.add")} onClose={onClose}>
       <div className="grid gap-2 pb-4">
+        {onScan ? (
+          <button
+            data-testid="choose-scan"
+            onClick={onScan}
+            className="flex min-h-[64px] items-center gap-3 rounded-card bg-brand-tint px-4 text-left active:opacity-90"
+          >
+            <ScanLine aria-hidden className="text-brand" size={24} strokeWidth={2} />
+            <span>
+              <span className="block text-base font-semibold">{t("scan.title")}</span>
+              <span className="block text-sm text-text-secondary">{t("scan.chooserLabel")}</span>
+            </span>
+          </button>
+        ) : null}
         <button
           data-testid="choose-money-in"
           onClick={() => onChoose("sale")}

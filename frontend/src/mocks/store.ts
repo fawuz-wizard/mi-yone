@@ -1320,3 +1320,73 @@ export function computeTrends(range: string): TrendsResponse {
     ],
   };
 }
+
+// ============================================================
+// MOCK: Scan-to-Sell checkout — parity with trade.checkout (multi-item cash
+// sale from the SAME primitives; server-side totals + stock validation)
+// ============================================================
+export interface CheckoutLine {
+  product_id: string;
+  name: string;
+  quantity: number;
+  unit_price: Money;
+  line_total: Money;
+}
+export interface CheckoutResult {
+  transaction: Transaction | null;
+  total: Money;
+  lines: CheckoutLine[];
+}
+
+const checkoutIdempotency = new Map<string, CheckoutResult>();
+
+export function checkout(
+  items: { product_id?: unknown; quantity?: unknown }[],
+  idempotencyKey: string | null,
+): { result: CheckoutResult; replay: boolean } | { error: string } {
+  if (idempotencyKey && checkoutIdempotency.has(idempotencyKey)) {
+    return { result: checkoutIdempotency.get(idempotencyKey)!, replay: true };
+  }
+  if (!Array.isArray(items) || items.length === 0) return { error: "Scan at least one product first." };
+  const seen = new Set<string>();
+  const lines: { row: ProductRow; quantity: number }[] = [];
+  for (const raw of items) {
+    const pid = String(raw.product_id ?? "");
+    const qty = raw.quantity;
+    if (seen.has(pid)) return { error: "The same product appears twice — combine the quantities." };
+    seen.add(pid);
+    if (typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) {
+      return { error: "Each scanned product needs a quantity of at least 1." };
+    }
+    const row = getProductRow(pid);
+    if (!row || row.archived) return { error: "One of the scanned products is not in your records." };
+    if (row.track) {
+      const available = stockOf(row.id);
+      if (qty > available) return { error: `Not enough ${row.name} in stock — only ${available} left.` };
+    }
+    lines.push({ row, quantity: qty });
+  }
+  const total = lines.reduce((a, l) => a + l.row.selling_minor * l.quantity, 0);
+  if (total <= 0) return { error: "This sale could not be recorded." };
+
+  for (const l of lines) if (l.row.track) addMovement(l.row.id, "SALE", -l.quantity, null);
+  const description = lines.map((l) => `${l.row.name} ×${l.quantity}`).join(", ").slice(0, 500);
+  const { transaction: tx } = createTransaction(
+    { type: "INCOME", amount_minor: total, description, source: "SALE" },
+    idempotencyKey ? `${idempotencyKey}:cash` : null,
+  );
+  saleLog.push({ at: new Date().toISOString(), total_minor: total });
+  const result: CheckoutResult = {
+    transaction: tx,
+    total: formatMoney(total),
+    lines: lines.map((l) => ({
+      product_id: l.row.id,
+      name: l.row.name,
+      quantity: l.quantity,
+      unit_price: formatMoney(l.row.selling_minor),
+      line_total: formatMoney(l.row.selling_minor * l.quantity),
+    })),
+  };
+  if (idempotencyKey) checkoutIdempotency.set(idempotencyKey, result);
+  return { result, replay: false };
+}

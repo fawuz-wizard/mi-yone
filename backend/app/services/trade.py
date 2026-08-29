@@ -78,6 +78,84 @@ def create_sale(
     return {"sale": sale, "transaction": cash_tx, "receivable": receivable}, False
 
 
+def checkout(
+    db: Session,
+    business_id: str,
+    actor: str,
+    *,
+    items: list[dict],  # [{product_id, quantity}]
+    idempotency_key: str | None,
+) -> tuple[dict, bool]:
+    """Scan-to-sell checkout: MULTI-item cash sale built from the SAME
+    primitives as every other sale (create_transaction + add_movement + one
+    Sale row) — no second sales-recording system. The SERVER computes the
+    total from current prices and validates stock; client totals are display
+    assistance only and are never trusted."""
+    if idempotency_key:
+        existing = db.scalar(select(Sale).where(Sale.business_id == business_id, Sale.idempotency_key == idempotency_key))
+        if existing:
+            cash = db.get(Transaction, existing.cash_transaction_id) if existing.cash_transaction_id else None
+            return {"sale": existing, "transaction": cash, "lines": [], "total_minor": existing.total_minor}, True
+
+    if not items:
+        raise ApiError(422, "VALIDATION_ERROR", "Scan at least one product first.")
+
+    # Resolve every line against THIS business's products; compute the total
+    # from the server's own current prices; validate stock before anything moves.
+    from ..serializers import stock_of  # local import to avoid a cycle
+
+    lines: list[dict] = []
+    seen: set[str] = set()
+    for raw in items:
+        pid = str(raw.get("product_id") or "")
+        qty = raw.get("quantity")
+        if pid in seen:
+            raise ApiError(422, "VALIDATION_ERROR", "The same product appears twice — combine the quantities.")
+        seen.add(pid)
+        if not isinstance(qty, int) or qty < 1:
+            raise ApiError(422, "VALIDATION_ERROR", "Each scanned product needs a quantity of at least 1.")
+        product = db.scalar(select(Product).where(Product.id == pid, Product.business_id == business_id, Product.archived.is_(False)))
+        if product is None:
+            raise ApiError(422, "VALIDATION_ERROR", "One of the scanned products is not in your records.")
+        if product.track_inventory:
+            available = stock_of(db, product.id)
+            if qty > available:
+                raise ApiError(
+                    422, "VALIDATION_ERROR",
+                    f"Not enough {product.name} in stock — only {available} left.",
+                )
+        lines.append({"product": product, "quantity": qty, "unit_minor": product.selling_minor, "line_minor": product.selling_minor * qty})
+
+    total = sum(line["line_minor"] for line in lines)
+    if total <= 0:
+        raise ApiError(422, "VALIDATION_ERROR", "This sale could not be recorded.")
+
+    for line in lines:
+        if line["product"].track_inventory:
+            add_movement(db, business_id, line["product"].id, actor, "SALE", -line["quantity"], None)
+
+    description = ", ".join(f"{line['product'].name} ×{line['quantity']}" for line in lines)[:500]
+    cash_tx, _ = create_transaction(
+        db, business_id, actor,
+        type_="INCOME", amount_minor=total,
+        description=description, counterparty_id=None, source="SALE",
+        idempotency_key=f"{idempotency_key}:cash" if idempotency_key else None,
+    )
+    sale = Sale(
+        id=gen_id("s"),
+        business_id=business_id,
+        total_minor=total,
+        occurred_at=utcnow(),
+        idempotency_key=idempotency_key,
+        cash_transaction_id=cash_tx.id,
+        receivable_id=None,
+    )
+    db.add(sale)
+    audit(db, business_id, actor, "sale.checkout", "sale", sale.id, f"{len(lines)} items")
+    db.flush()
+    return {"sale": sale, "transaction": cash_tx, "lines": lines, "total_minor": total}, False
+
+
 def settle_debt(db: Session, business_id: str, actor: str, debt_id: str, amount_minor: int) -> tuple[Debt, Transaction]:
     debt = db.scalar(select(Debt).where(Debt.id == debt_id, Debt.business_id == business_id))
     if debt is None:

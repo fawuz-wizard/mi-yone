@@ -24,6 +24,15 @@ class CreateSaleInput(BaseModel):
     description: str | None = Field(default=None, max_length=500)
 
 
+class CheckoutItem(BaseModel):
+    product_id: str = Field(min_length=1, max_length=40)
+    quantity: int = Field(ge=1, le=9999)
+
+
+class CheckoutInput(BaseModel):
+    items: list[CheckoutItem] = Field(min_length=1, max_length=50)
+
+
 class CreateDebtInput(BaseModel):
     counterparty_id: str = Field(max_length=40)
     amount_minor: int = Field(ge=1, le=100_000_000_000)
@@ -52,6 +61,39 @@ def create_sale(
             "transaction": tx_json(result["transaction"]) if result["transaction"] else None,
             "receivable": debt_json(db, result["receivable"]) if result["receivable"] else None,
             "total": format_money(result["sale"].total_minor),
+        },
+        status_code=200 if replay else 201,
+    )
+
+
+@router.post("/sales/checkout")
+def checkout(
+    body: CheckoutInput,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=80),
+    ctx: TenantContext = Depends(tenant),
+    db: Session = Depends(get_db),
+):
+    """Scan-to-sell: multi-item cash sale. The server computes the total and
+    validates stock — client totals are never trusted (spec §6)."""
+    result, replay = trade.checkout(
+        db, ctx.business.id, ctx.user.full_name,
+        items=[{"product_id": i.product_id, "quantity": i.quantity} for i in body.items],
+        idempotency_key=idempotency_key,
+    )
+    return ok(
+        {
+            "transaction": tx_json(result["transaction"]) if result["transaction"] else None,
+            "total": format_money(result["total_minor"]),
+            "lines": [
+                {
+                    "product_id": line["product"].id,
+                    "name": line["product"].name,
+                    "quantity": line["quantity"],
+                    "unit_price": format_money(line["unit_minor"]),
+                    "line_total": format_money(line["line_minor"]),
+                }
+                for line in result["lines"]
+            ],
         },
         status_code=200 if replay else 201,
     )

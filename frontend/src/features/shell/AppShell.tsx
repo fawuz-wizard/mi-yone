@@ -2,7 +2,7 @@
 // Application shell (Phase 5 §13): bottom nav + FAB on mobile, sidebar at ≥1024px.
 // Same five destinations, same order, both platforms.
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Home, ArrowLeftRight, Package, Compass, Menu as MenuIcon, Plus } from "lucide-react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { CaptureChooser, CaptureSheet, useCaptureController } from "@/features/capture/CaptureSheet";
@@ -30,6 +30,7 @@ const NAV = [
 export function AppShell({ businessName, initial, children }: { businessName: string; initial: string; children: ReactNode }) {
   const t = useT();
   const pathname = usePathname();
+  const router = useRouter();
   const [chooserOpen, setChooserOpen] = useState(false);
   const capture = useCaptureController();
 
@@ -116,6 +117,10 @@ export function AppShell({ businessName, initial, children }: { businessName: st
         onChoose={(kind) => {
           setChooserOpen(false);
           capture.open(kind);
+        }}
+        onScan={() => {
+          setChooserOpen(false);
+          router.push("/scan");
         }}
       />
       <CaptureSheet state={capture.state} setState={capture.setState} onClose={capture.close} />

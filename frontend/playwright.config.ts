@@ -8,7 +8,11 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:3100",
     viewport: { width: 360, height: 640 }, // mobile foundation (Phase 4 §11)
-    launchOptions: { executablePath: process.env.MIY_CHROMIUM || undefined },
+    launchOptions: {
+      executablePath: process.env.MIY_CHROMIUM || undefined,
+      // fake camera so the scan-to-sell screen can exercise getUserMedia headlessly
+      args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+    },
   },
   webServer: {
     command: "npm run start -- --port 3100",

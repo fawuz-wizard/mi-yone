@@ -8,16 +8,21 @@ export class DomainError extends Error {
   kind: DomainErrorKind;
   messageId: string;
   requestId?: string;
-  constructor(kind: DomainErrorKind, messageId: string, requestId?: string) {
+  // The server's own user-facing sentence (already shop-floor language) —
+  // screens that need the specific reason (e.g. "only 3 left") can show it.
+  serverMessage?: string;
+  constructor(kind: DomainErrorKind, messageId: string, requestId?: string, serverMessage?: string) {
     super(messageId);
     this.kind = kind;
     this.messageId = messageId;
     this.requestId = requestId;
+    this.serverMessage = serverMessage;
   }
 }
 
 export function mapApiError(status: number, body: ApiErrorBody | undefined): DomainError {
   const rid = body?.request_id;
+  const msg = body?.message;
   switch (body?.code) {
     case "AUTH_REQUIRED":
     case "AUTH_INVALID":
@@ -27,7 +32,7 @@ export function mapApiError(status: number, body: ApiErrorBody | undefined): Dom
     case "RATE_LIMITED":
       return new DomainError("server", "error.rateLimited", rid);
     case "VALIDATION_ERROR":
-      return new DomainError("validation", "capture.saveFailed", rid);
+      return new DomainError("validation", "capture.saveFailed", rid, msg);
     case "TENANT_NOT_FOUND":
     case "NOT_FOUND":
       return new DomainError("not_found", "error.generic", rid);

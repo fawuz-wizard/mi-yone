@@ -2,7 +2,8 @@
 // Stock (Phase 4 §19 / Phase 5 5F): "What do I have and what's running low?"
 // Low-stock first, amber badge + the word "Low" (never color alone).
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import Link from "next/link";
+import { Plus, QrCode } from "lucide-react";
 import { useProducts } from "@/features/capture/api";
 import { ProductDetailSheet } from "@/features/stock/ProductDetailSheet";
 import { ProductFormSheet } from "@/features/stock/ProductFormSheet";
@@ -39,6 +40,14 @@ export default function StockPage() {
         <Button level="secondary" onClick={() => setImporting(true)} data-testid="wa-open">
           {t("wa.entry")}
         </Button>
+        <Link
+          href="/labels"
+          aria-label={t("scan.printLabels")}
+          data-testid="labels-open"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-input border-[1.5px] border-brand text-brand"
+        >
+          <QrCode size={18} aria-hidden />
+        </Link>
       </div>
 
       <WhatsAppImportSheet open={importing} onClose={() => setImporting(false)} />

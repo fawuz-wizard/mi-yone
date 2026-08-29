@@ -85,7 +85,14 @@ description/sku/category/image_key; image upload/serve/remove routes
 (Anthropic env-gated, name/category/description ONLY — never price; local →
 available:false, honest); photo-first product form with preview/replace/remove,
 duplicate-name warning, suggestion chips; detail-sheet photo block.
-61 unit + 68 Playwright E2E green; 66 backend tests.
+QR Scan-to-Sell (MVP; batch QR system = future Premium, do not build): QR
+payload `MIYONE:P1:<product-id>` (shared/qr.ts codec, versioned for future
+`B1:` batch codes; no business data in the code), qrcode npm lib for local
+rendering (stated dep reason), /labels print sheet + per-product QR sheet,
+features/scan (BarcodeDetector scanner w/ tap-to-add fallback, cart,
+idempotent multi-item checkout via NEW trade.checkout — SAME primitives,
+server-computed totals + hard stock validation), chooser gains Scan to sell.
+61 unit + 75 Playwright E2E green; 72 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable
