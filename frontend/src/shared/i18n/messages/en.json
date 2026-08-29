@@ -9,14 +9,12 @@
   "common.seeDetails": "See details",
   "common.keepEditing": "Keep editing",
   "common.discard": "Discard",
-
   "nav.home": "Home",
   "nav.money": "Money",
   "nav.stock": "Stock",
   "nav.partner": "Partner",
   "nav.menu": "Menu",
   "nav.add": "Add",
-
   "door.tagline": "Your business, in your pocket.",
   "door.getStarted": "Get started",
   "door.haveAccount": "I have an account",
@@ -25,7 +23,6 @@
   "door.password": "Password",
   "door.signInFailed": "We couldn't sign you in. Check your details and try again.",
   "door.demoNote": "Demo business — sign in with mariama@example.sl / demo-password.",
-
   "home.question": "How is my business doing?",
   "home.today": "Today",
   "home.week": "This week",
@@ -44,7 +41,6 @@
   "home.updateFailed": "Couldn't update your numbers. Showing your last saved view.",
   "home.emptyTitle": "Let's get your first record in.",
   "home.emptyBody": "Your business picture starts with one entry.",
-
   "capture.moneyIn": "Money in",
   "capture.moneyOut": "Money out",
   "capture.sale": "Sale",
@@ -71,7 +67,6 @@
   "capture.category": "Category",
   "capture.when": "When?",
   "capture.today": "Today",
-
   "filter.dateLabel": "Period",
   "filter.all": "All time",
   "filter.today": "Today",
@@ -79,27 +74,22 @@
   "filter.30d": "30 days",
   "filter.categoryLabel": "Category",
   "filter.anyCategory": "All categories",
-
   "detail.remove": "Remove this record",
   "detail.removeTitle": "Remove this record?",
   "detail.removeBody": "{amount} will be taken out of your books. It stays in your history as removed.",
   "detail.removeDone": "Record removed",
-
   "fix.newCategory": "Category",
   "fix.newNote": "What was it for? (optional)",
   "fix.newDate": "When",
-
   "chip.more": "More…",
   "chip.none": "None",
   "search.label": "Search",
   "search.clear": "Clear search",
-
   "money.owedTotal": "Customers owe you {amount}",
   "money.oweTotal": "You owe suppliers {amount}",
   "money.owedEmptyTitle": "When a customer takes goods on credit, track it here so nothing is forgotten.",
   "money.oweEmptyTitle": "What you owe suppliers will show here.",
   "money.searchNoResults": "Nothing matches your search.",
-
   "debt.since": "since {date}",
   "debt.overdue": "overdue",
   "debt.owesYou": "Owes you",
@@ -113,11 +103,9 @@
   "debt.remainingToast": "{name}'s debt: {amount} remaining",
   "debt.clearedToast": "{name}'s debt cleared",
   "debt.overpayError": "The payment is more than what is owed.",
-
   "keypad.amountLabel": "Amount in Leones",
   "keypad.backspace": "Delete last digit",
   "keypad.decimal": "Decimal point",
-
   "money.question": "Where is my money?",
   "money.tabAll": "All",
   "money.tabIn": "In",
@@ -130,7 +118,6 @@
   "money.yesterday": "Yesterday",
   "money.fixed": "Fixed",
   "money.pending": "Waiting for network",
-
   "detail.title": "Record",
   "detail.what": "What",
   "detail.when": "When",
@@ -145,7 +132,6 @@
   "detail.fixedBy": "Fixed by {name}",
   "detail.was": "was {amount}",
   "detail.now": "→ {amount}",
-
   "fix.title": "Fix this record",
   "fix.explain": "MI YONE keeps your history safe: the wrong record stays visible as fixed, and the correct one takes its place.",
   "fix.newAmount": "Correct amount",
@@ -153,7 +139,6 @@
   "fix.confirmBody": "{old} will be marked as fixed and replaced by {new}.",
   "fix.confirm": "Fix record",
   "fix.done": "Record fixed",
-
   "sync.saving": "Saving {count} record…",
   "sync.savingMany": "Saving {count} records…",
   "sync.pending": "Waiting for network — we'll save this automatically.",
@@ -161,7 +146,6 @@
   "sync.failedBody": "Your information is still here.",
   "sync.allSaved": "All saved ✓",
   "sync.status": "Saving status",
-
   "stock.question": "What do I have and what's running low?",
   "stock.addProduct": "Add product",
   "stock.low": "Low",
@@ -213,7 +197,6 @@
   "menu.settings": "Business settings",
   "menu.people": "People",
   "menu.help": "Help",
-
   "parties.customers": "Customers",
   "parties.suppliers": "Suppliers",
   "parties.customersQuestion": "Who owes me?",
@@ -242,7 +225,6 @@
   "parties.emptyCustomers": "Keep your customers and what they owe in one place.",
   "parties.emptySuppliers": "Track who you buy from and what you owe them.",
   "parties.saved": "Saved",
-
   "reports.title": "Insights",
   "reports.question": "What is changing in my business?",
   "reports.periodToday": "Today",
@@ -267,7 +249,6 @@
   "reports.exportPdf": "Print / Save as PDF",
   "reports.emptyTitle": "Your report will build itself as you record.",
   "reports.printedFrom": "Printed from MI YONE · {period}",
-
   "perf.title": "Performance",
   "perf.rangeLabel": "Time range",
   "perf.range7d": "7D",
@@ -284,13 +265,32 @@
   "perf.net": "Left over",
   "perf.chartAria": "Performance chart: money in, money out and left over by period. Use arrow keys to read values.",
   "perf.tableCaption": "Performance by period",
-
   "partner.fromRecords": "From your records",
   "partner.fromWeb": "From the web · {source} · {date}",
-
   "error.generic": "Something didn't work. Your information is still here.",
   "error.network": "We couldn't reach the network. Your information is still here.",
   "error.auth": "Please sign in again to keep your records safe.",
   "error.permission": "You don't have permission to do this. Ask the business owner.",
-  "error.rateLimited": "Too many attempts. Please wait a moment and try again."
+  "error.rateLimited": "Too many attempts. Please wait a moment and try again.",
+  "nlc.label": "Say it or type it",
+  "nlc.placeholder": "e.g. Sold 3 bags of rice at 350 each",
+  "nlc.fill": "Fill it in",
+  "nlc.mic": "Speak the sale",
+  "nlc.micStop": "Stop listening",
+  "nlc.listening": "Listening… speak now",
+  "nlc.heardNothing": "We didn't catch that — try again.",
+  "nlc.heardTitle": "What we understood",
+  "nlc.sumProduct": "{qty} × {product}",
+  "nlc.sumEach": "at Le {price} each",
+  "nlc.issue.notUnderstood": "We couldn't find a sale in that. Try something like “Sold 3 bags of rice at 350 each”.",
+  "nlc.issue.missingAmount": "We couldn't tell the total — enter the amount below.",
+  "nlc.issue.missingQuantity": "How many were sold? Choose the quantity, then enter the total below.",
+  "nlc.issue.checkQuantity": "We set the quantity to 1 — change it if that's wrong.",
+  "nlc.issue.usedCatalogPrice": "No price was said — we used your set price. Check the amount.",
+  "nlc.issue.conflictTotal": "The numbers don't agree: quantity × price makes Le {computed}, but you said Le {stated}. Enter the right amount below.",
+  "nlc.issue.unknownProduct": "“{name}” is not in your stock list — pick a product below or leave it out.",
+  "nlc.issue.ambiguousProduct": "More than one product matches — pick the right one below.",
+  "nlc.issue.ambiguousCustomer": "More than one customer matches — pick the right one below.",
+  "nlc.issue.needCustomer": "Who owes you for this? Pick the customer below.",
+  "nlc.issue.unclearNumbers": "Some numbers didn't fit — check the amount before saving."
 }

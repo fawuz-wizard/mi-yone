@@ -33,6 +33,8 @@ import {
   type CaptureKind,
   type CaptureState,
 } from "./machine";
+import { QuickEntry } from "./QuickEntry";
+import type { InterpretedSale } from "./interpret";
 
 export function useCaptureController() {
   const [state, setState] = useState<CaptureState>({ name: "IDLE" });
@@ -74,6 +76,9 @@ export function CaptureSheet({
   const [paidNow, setPaidNow] = useState<AmountState>(EMPTY_AMOUNT);
   const [paidNowOpen, setPaidNowOpen] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // When a quick entry stated its own unit price, the quantity stepper keeps
+  // using it (instead of silently reverting to the catalog price).
+  const [unitOverrideMinor, setUnitOverrideMinor] = useState<number | null>(null);
 
   const dirty = !isEmpty(amount);
   const needsCustomer = isSale && payment === "OWES" && !customerId;
@@ -90,6 +95,7 @@ export function CaptureSheet({
     setPaidNow(EMPTY_AMOUNT);
     setPaidNowOpen(false);
     setConfirmDiscard(false);
+    setUnitOverrideMinor(null);
   }, []);
 
   const handleClose = useCallback(() => {
@@ -97,13 +103,36 @@ export function CaptureSheet({
     onClose();
   }, [reset, onClose]);
 
-  // Selecting a product pre-fills the amount from its server price × quantity.
-  // This is input assistance only — the server re-validates the submitted sale.
-  function applyProduct(id: string | null, qty: number) {
+  // Selecting a product pre-fills the amount from its server price × quantity
+  // (or the price stated in a quick entry, when there is one). This is input
+  // assistance only — the server re-validates the submitted sale.
+  function applyProduct(id: string | null, qty: number, overrideMinor: number | null = unitOverrideMinor) {
     setProductId(id);
     setQuantity(qty);
     const product = products.data?.find((p) => p.id === id);
-    if (product) setAmount(fromMinor(product.selling_price.amount_minor * qty));
+    const unitMinor = overrideMinor ?? product?.selling_price.amount_minor;
+    if (product && unitMinor) setAmount(fromMinor(unitMinor * qty));
+  }
+
+  // Apply an interpreted quick entry to the form. The filled form is the
+  // confirmation preview — nothing is recorded until the owner presses Save.
+  function applyInterpreted(r: InterpretedSale) {
+    setAmount(r.totalMinor !== null ? fromMinor(r.totalMinor) : EMPTY_AMOUNT);
+    setProductId(r.productId);
+    setQuantity(r.quantity ?? 1);
+    const derivedUnit =
+      r.unitPriceMinor ??
+      (r.totalMinor !== null && r.quantity && r.totalMinor % r.quantity === 0 ? r.totalMinor / r.quantity : null);
+    setUnitOverrideMinor(derivedUnit);
+    if (r.payment === "PAID") {
+      setPayment("PAID");
+      setPaidNow(EMPTY_AMOUNT);
+    } else {
+      setPayment("OWES");
+      setPaidNow(r.paidNowMinor !== null ? fromMinor(r.paidNowMinor) : EMPTY_AMOUNT);
+    }
+    setCustomerId(r.customerId);
+    if (state.name === "OPEN") setState({ ...state, name: "EDITING" });
   }
 
   const submit = useCallback(async () => {
@@ -232,6 +261,12 @@ export function CaptureSheet({
             </div>
           ) : null}
 
+          {/* Quick sale entry (sale only): type or speak → interpret → the form
+              below becomes the editable confirmation preview. */}
+          {kind === "sale" ? (
+            <QuickEntry products={products.data ?? []} customers={customers.data ?? []} onApply={applyInterpreted} />
+          ) : null}
+
           <AmountKeypad
             value={amount}
             onChange={(next) => {
@@ -247,7 +282,10 @@ export function CaptureSheet({
                 label={t("capture.product")}
                 options={(products.data ?? []).map((p) => ({ id: p.id, label: p.name, sublabel: p.selling_price.display }))}
                 selectedId={productId}
-                onSelect={(id) => applyProduct(id, 1)}
+                onSelect={(id) => {
+                  setUnitOverrideMinor(null); // manual pick returns to the catalog price
+                  applyProduct(id, 1, null);
+                }}
               />
               {productId ? (
                 <div className="mt-2 flex items-center gap-3">
