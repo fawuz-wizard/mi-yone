@@ -7,7 +7,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 async function signIn(page: Page) {
   await page.goto("/");
-  await page.getByRole("link", { name: "Get started" }).click();
+  await page.getByRole("link", { name: "I have an account" }).click();
   await page.getByTestId("signin-identifier").fill("mariama@example.sl");
   await page.getByTestId("signin-password").fill("demo-password");
   await page.getByTestId("signin-submit").click();

@@ -73,7 +73,12 @@ catalog integration (`app/integrations/catalog.py` provider boundary — TEST
 adapter default, honestly labeled, Meta Graph adapter credential-gated via
 MIYONE_WA_*; connect → import → review → approve/skip with duplicate detection;
 approve creates a normal product; UI in features/stock/WhatsAppImportSheet).
-61 unit + 58 Playwright E2E green; 56 backend tests.
+Setup flow (5I): welcome → /signup (name, business name, phone/email, password
+≥10) → /auth/register → signed in to a fresh business; BUSINESS_ID is now
+localStorage-backed (`setActiveBusiness`), sign-in/up do a full navigation to
+rebind it; mock register signs into the labeled demo store (single-tenant) and
+mock login now validates the demo credentials.
+61 unit + 63 Playwright E2E green; 59 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

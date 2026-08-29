@@ -46,3 +46,56 @@ def test_logout_revokes_session(client):
     assert client.get("/api/v1/businesses/b-1/transactions").status_code == 200
     client.post("/api/v1/auth/logout")
     assert client.get("/api/v1/businesses/b-1/transactions").status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Setup flow: /auth/register creates an isolated business, signed in at once
+# ---------------------------------------------------------------------------
+
+def test_register_creates_isolated_business_and_session():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    c = TestClient(app)
+    r = c.post("/api/v1/auth/register", json={
+        "name": "Fatmata Kamara", "identifier": "fatmata@test.sl",
+        "password": "first-shop-2026", "business_name": "Fatmata's Shop",
+    })
+    assert r.status_code == 201
+    business = r.json()["data"]["business"]
+    assert business["name"] == "Fatmata's Shop"
+    bid = business["id"]
+
+    # Session started immediately (cookie) — the new business is reachable…
+    me = c.get("/api/v1/auth/me")
+    assert me.json()["data"]["business"]["id"] == bid
+    dash = c.get(f"/api/v1/businesses/{bid}/analytics/dashboard")
+    assert dash.status_code == 200
+    assert dash.json()["data"]["health"]["money_in"]["amount_minor"] == 0  # empty, not demo data
+    # …with seeded categories ready for the first expense
+    cats = c.get(f"/api/v1/businesses/{bid}/categories?kind=EXPENSE").json()["data"]
+    assert any(cat["name"] == "Transport" for cat in cats)
+    # …and no reach into anyone else's business
+    assert c.get("/api/v1/businesses/b-1/analytics/dashboard").status_code == 404
+
+
+def test_register_duplicate_identifier_fails_without_enumeration():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    c = TestClient(app)
+    payload = {"name": "A", "identifier": "dupe@test.sl", "password": "long-enough-pw", "business_name": "Shop A"}
+    assert c.post("/api/v1/auth/register", json=payload).status_code == 201
+    c2 = TestClient(app)
+    r = c2.post("/api/v1/auth/register", json=payload)
+    assert r.status_code == 422  # same generic surface as other validation failures
+
+
+def test_register_rejects_short_password():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    r = TestClient(app).post("/api/v1/auth/register", json={
+        "name": "B", "identifier": "b@test.sl", "password": "short", "business_name": "Shop B",
+    })
+    assert r.status_code == 422

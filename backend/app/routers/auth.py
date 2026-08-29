@@ -103,10 +103,12 @@ def register(body: RegisterInput, db: Session = Depends(get_db)):
         raise ApiError(422, "VALIDATION_ERROR", "Some of the information is invalid.")
     user = User(id=gen_id("u"), email=identifier, password_hash=hash_password(body.password), full_name=body.name.strip())
     db.add(user)
+    db.flush()  # plain-FK models don't order inserts — the user row must exist first
     business = None
     if body.business_name and body.business_name.strip():
         business = Business(id=gen_id("b"), name=body.business_name.strip())
         db.add(business)
+        db.flush()
         db.add(BusinessMember(id=gen_id("bm"), business_id=business.id, user_id=user.id, role="OWNER"))
         seed_categories(db, business.id)
     audit(db, business.id if business else None, user.full_name, "auth.register")

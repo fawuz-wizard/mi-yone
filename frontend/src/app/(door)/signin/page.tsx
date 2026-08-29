@@ -1,13 +1,18 @@
 "use client";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/shared/api/client";
+import { setActiveBusiness } from "@/shared/api/session";
 import { Button } from "@/shared/design-system/Button";
 import { useT } from "@/shared/i18n";
 
+interface LoginResponse {
+  user: { name: string };
+  business: { id: string; name: string } | null;
+}
+
 export default function SignInPage() {
   const t = useT();
-  const router = useRouter();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,8 +23,10 @@ export default function SignInPage() {
     setBusy(true);
     setError(false);
     try {
-      await api("/auth/login", { method: "POST", body: { identifier, password } });
-      router.push("/home");
+      const data = await api<LoginResponse>("/auth/login", { method: "POST", body: { identifier, password } });
+      if (data.business) setActiveBusiness(data.business.id);
+      // Full navigation so the business identity is bound fresh for this session.
+      window.location.assign("/home");
     } catch {
       setError(true);
       setBusy(false);
@@ -66,6 +73,9 @@ export default function SignInPage() {
             {t("door.signIn")}
           </Button>
         </form>
+        <Link href="/signup" className="mt-5 flex min-h-[44px] items-center justify-center text-base font-semibold text-brand">
+          {t("door.newHere")}
+        </Link>
       </div>
     </main>
   );

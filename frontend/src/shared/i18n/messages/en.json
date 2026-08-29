@@ -360,5 +360,13 @@
   "wa.skippedToast": "Skipped · {name}",
   "wa.allDone": "All reviewed — {added} added, {skipped} skipped.",
   "wa.statusApproved": "Added",
-  "wa.statusSkipped": "Skipped"
+  "wa.statusSkipped": "Skipped",
+  "door.signupTitle": "Set up your business",
+  "door.signupIntro": "Two minutes, and your business has a home. Own your money. Understand your business.",
+  "door.yourName": "Your name",
+  "door.businessName": "Business name",
+  "door.passwordHint": "At least 10 characters — keep it something only you know.",
+  "door.createButton": "Open my business",
+  "door.signupFailed": "We couldn't set that up. Check the details — if you've signed up before, sign in instead.",
+  "door.newHere": "New here? Set up your business"
 }

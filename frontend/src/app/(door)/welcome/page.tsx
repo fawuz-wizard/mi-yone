@@ -14,7 +14,7 @@ export default function WelcomePage() {
       </div>
       <div className="flex w-full max-w-[320px] flex-col gap-3">
         <Link
-          href="/signin"
+          href="/signup"
           className="flex min-h-[48px] items-center justify-center rounded-input bg-action text-base font-semibold text-text-inverse"
         >
           {t("door.getStarted")}
