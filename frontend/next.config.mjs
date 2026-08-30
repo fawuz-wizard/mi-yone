@@ -1,6 +1,15 @@
 /** @type {import('next').NextConfig} */
 const backend = process.env.MIYONE_BACKEND_URL; // e.g. http://localhost:8000
 
+// Announce the API mode loudly at startup so nobody debugs the wrong stack:
+// with no MIYONE_BACKEND_URL the app serves the clearly-labeled in-repo MOCK.
+console.log(
+  backend
+    ? `[MI YONE] API mode: REAL backend — proxying /api/v1 → ${backend}`
+    : "[MI YONE] API mode: in-repo MOCK (no MIYONE_BACKEND_URL set). " +
+        "To use FastAPI: MIYONE_BACKEND_URL=http://localhost:8000 npm run dev",
+);
+
 const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   poweredByHeader: false,
