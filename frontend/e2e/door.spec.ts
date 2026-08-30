@@ -22,8 +22,9 @@ test("sign up: set up a business, land signed in, record the first sale in secon
   // Signed in and home — the business identity is live.
   await expect(page.getByTestId("business-name")).not.toBeEmpty();
 
-  // First sale, ten-second style: quick action → amount → save.
-  await page.getByTestId("qa-money-in").click();
+  // First sale, ten-second style: + → Money in → amount → save.
+  await page.getByTestId("fab-add").click();
+  await page.getByTestId("choose-money-in").click();
   for (const d of "5000") await page.getByRole("button", { name: d, exact: true }).click();
   await page.getByTestId("capture-save").click();
   await expect(page.getByTestId("toast")).toContainText("Saved · Le 5,000");

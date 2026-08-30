@@ -1,9 +1,7 @@
 "use client";
 // Home (Phase 5 §23–26): identity → Health → Attention → one Insight → Quick actions.
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowDownToLine, ArrowUpFromLine, Compass, Package } from "lucide-react";
 import { api } from "@/shared/api/client";
 import type { DashboardResponse } from "@/shared/api/types";
 import { BUSINESS_ID } from "@/shared/api/session";
@@ -22,7 +20,7 @@ import { useT } from "@/shared/i18n";
 
 export default function HomePage() {
   const t = useT();
-  const { openCapture, openChooser } = useCapture();
+  const { openCapture } = useCapture();
   const [period, setPeriod] = useState<Period>("today");
   const [pendingCount, setPendingCount] = useState(0);
   useEffect(() => captureQueue.observe((items) => setPendingCount(items.length)), []);
@@ -111,45 +109,8 @@ export default function HomePage() {
         />
       ) : null}
 
-      {/* Quick actions */}
-      <section aria-label={t("home.quickActions")} className="grid grid-cols-2 gap-2">
-        <QuickAction icon={<ArrowDownToLine aria-hidden size={20} />} label={t("home.recordMoneyIn")} onPress={() => openCapture("sale")} testId="qa-money-in" />
-        <QuickAction icon={<ArrowUpFromLine aria-hidden size={20} />} label={t("home.recordMoneyOut")} onPress={() => openCapture("expense")} testId="qa-money-out" />
-        <QuickAction icon={<Package aria-hidden size={20} />} label={t("home.addStock")} onPress={openChooser} testId="qa-stock" />
-        <QuickAction icon={<Compass aria-hidden size={20} />} label={t("home.askPartner")} href="/partner" testId="qa-partner" />
-      </section>
+      {/* Quick-actions grid removed per owner decision: every entry path lives
+          behind the + button, and Partner has its own tab — no duplicates. */}
     </div>
-  );
-}
-
-function QuickAction({
-  icon,
-  label,
-  onPress,
-  href,
-  testId,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onPress?: () => void;
-  href?: string;
-  testId: string;
-}) {
-  const className =
-    "flex min-h-[56px] items-center justify-center gap-2 rounded-card border border-border bg-surface " +
-    "text-sm font-semibold text-text-primary active:bg-sunken";
-  if (href) {
-    return (
-      <Link href={href} className={className} data-testid={testId}>
-        {icon}
-        {label}
-      </Link>
-    );
-  }
-  return (
-    <button onClick={onPress} className={className} data-testid={testId}>
-      {icon}
-      {label}
-    </button>
   );
 }
