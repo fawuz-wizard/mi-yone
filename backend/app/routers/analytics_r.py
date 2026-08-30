@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import TenantContext, tenant
 from ..core.envelope import ok
+from ..ai.evidence import overview_line
 from ..services import analytics
 from ..services.watch import compute_watch
 
@@ -17,7 +18,13 @@ REPORT_PERIODS = ("today", "week", "month", "last_month")
 @router.get("/analytics/dashboard")
 def dashboard(period: str = "today", ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
     p = period if period in PERIODS else "today"
-    return ok(analytics.dashboard(db, ctx.business, p))
+    payload = analytics.dashboard(db, ctx.business, p)
+    # Partner summary line (AI CONTEXT layer): upgrades the insight slot when
+    # there is enough history; otherwise the deterministic insight stands.
+    line = overview_line(db, ctx.business)
+    if line is not None:
+        payload["insight"] = line
+    return ok(payload)
 
 
 @router.get("/analytics/performance")

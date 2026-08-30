@@ -104,8 +104,34 @@ def dashboard(db: Session, business: Business, period: str) -> dict:
             "action_target": "/money?tab=out",
         }
 
+    # Spending summary for the SELECTED period — Overview answers "where is the
+    # money going right now?" in three lines; Reports keeps the full breakdown.
+    p_by_cat: dict[str, int] = {}
+    for t in rows:
+        if t.type == "EXPENSE" and start <= t.occurred_at < end:
+            p_by_cat[t.category_name] = p_by_cat.get(t.category_name, 0) + t.amount_minor
+    ranked = sorted(p_by_cat.items(), key=lambda kv: -kv[1])
+    spending = (
+        {"total": format_money(expenses), "top": [{"name": n, "total": format_money(v)} for n, v in ranked[:3]]}
+        if ranked
+        else None
+    )
+
+    # Profit for the same period, computed by the SAME report() logic Reports
+    # use, so Overview and Reports can never disagree. Margin only when booked
+    # revenue exists — never a percentage on a zero base.
+    r = report(db, business.id, period)
+    booked_rev = r["profit"]["booked_revenue"]["amount_minor"]
+    profit_minor = r["profit"]["profit"]["amount_minor"]
+    profit = None
+    if income > 0 or expenses > 0 or booked_rev > 0:
+        margin = f"{profit_minor / booked_rev * 100:.0f}" if booked_rev > 0 else None
+        profit = {"estimated": r["profit"]["profit"], "margin_pct": margin}
+
     return {
         "business": {"id": business.id, "name": business.name, "currency": business.currency, "initial": business.name[:1].upper()},
+        "spending": spending,
+        "profit": profit,
         "health": {
             "period": period,
             "money_in": format_money(income),
@@ -235,7 +261,60 @@ def trends(db: Session, business_id: str, range_: str) -> dict:
         _trend_metric("units_sold", cur_units, prev_units, str(cur_units), True, has_history),
         _trend_metric("owed_to_you", outstanding_now, outstanding_start, format_money(outstanding_now)["display"], False, has_history and outstanding_start > 0),
     ]
-    return {"range": range_, "metrics": metrics}
+
+    # CONTRIBUTION analysis (not causal): which recorded thing moved most
+    # between the two windows. Pure arithmetic over the ledger — it states the
+    # size of a change, never the reason behind it. Withheld entirely when
+    # there is no history to compare against.
+    contributors: list[dict] = []
+    if has_history:
+        # Spending: the category whose total changed most.
+        cur_cat: dict[str, int] = {}
+        prev_cat: dict[str, int] = {}
+        for t in rows:
+            if t.type != "EXPENSE":
+                continue
+            if cur_start <= t.occurred_at < end:
+                cur_cat[t.category_name] = cur_cat.get(t.category_name, 0) + t.amount_minor
+            elif prev_start <= t.occurred_at < cur_start:
+                prev_cat[t.category_name] = prev_cat.get(t.category_name, 0) + t.amount_minor
+        cat_deltas = {n: cur_cat.get(n, 0) - prev_cat.get(n, 0) for n in set(cur_cat) | set(prev_cat)}
+        if cat_deltas:
+            name, delta = max(cat_deltas.items(), key=lambda kv: abs(kv[1]))
+            if delta != 0:
+                word = "increased" if delta > 0 else "decreased"
+                contributors.append({
+                    "id": "contrib-spending",
+                    "text": f"{name} spending {word} by {format_money(abs(delta))['display']} — the largest change in your spending compared with the period before.",
+                })
+        # Sales: the product whose sold units changed most (units are recorded facts).
+        product_names = {p.id: p.name for p in db.scalars(select(Product).where(Product.business_id == business_id))}
+        cur_u: dict[str, int] = {}
+        prev_u: dict[str, int] = {}
+        for m in movements:
+            if cur_start <= m.occurred_at < end:
+                cur_u[m.product_id] = cur_u.get(m.product_id, 0) + abs(m.quantity_delta)
+            elif prev_start <= m.occurred_at < cur_start:
+                prev_u[m.product_id] = prev_u.get(m.product_id, 0) + abs(m.quantity_delta)
+        unit_deltas = {pid: cur_u.get(pid, 0) - prev_u.get(pid, 0) for pid in set(cur_u) | set(prev_u)}
+        if unit_deltas:
+            pid, d = max(unit_deltas.items(), key=lambda kv: abs(kv[1]))
+            if d != 0 and pid in product_names:
+                contributors.append({
+                    "id": "contrib-sales",
+                    "text": f"{product_names[pid]} sold {abs(d)} {'more' if d > 0 else 'fewer'} unit{'s' if abs(d) != 1 else ''} than the period before — the biggest change in what you sold.",
+                })
+        # Left over: which side (money in vs money out) moved it more.
+        d_in, d_out = cur_in - prev_in, cur_out - prev_out
+        if d_in != 0 or d_out != 0:
+            side_in = abs(d_in) >= abs(d_out)
+            d = d_in if side_in else d_out
+            contributors.append({
+                "id": "contrib-left-over",
+                "text": f"Money {'in' if side_in else 'out'} moved most: {'up' if d > 0 else 'down'} {format_money(abs(d))['display']} compared with the period before — the biggest influence on what you kept.",
+            })
+
+    return {"range": range_, "metrics": metrics, "contributors": contributors}
 
 
 def report(db: Session, business_id: str, period: str) -> dict:

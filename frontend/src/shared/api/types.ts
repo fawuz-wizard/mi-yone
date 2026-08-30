@@ -69,6 +69,10 @@ export interface DashboardResponse {
   health: HealthPeriod;
   attention: AttentionItem[];
   insight: Insight | null;
+  // Overview refinement (M17): period-scoped spending summary + profit with
+  // server-computed margin. Both null when the records can't support them.
+  spending: { total: Money; top: { name: string; total: Money }[] } | null;
+  profit: { estimated: Money; margin_pct: string | null } | null;
 }
 
 export interface ApiErrorBody {
@@ -173,6 +177,9 @@ export interface TrendMetric {
 export interface TrendsResponse {
   range: string;
   metrics: TrendMetric[];
+  // Contribution analysis (M17): server-composed factual sentences — the
+  // largest measured changes, never causal claims. Empty without history.
+  contributors: { id: string; text: string }[];
 }
 
 export interface Product {

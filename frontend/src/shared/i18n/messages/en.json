@@ -414,5 +414,11 @@
   "scan.printSheetTitle": "Product QR labels",
   "scan.print": "Print",
   "scan.labelsHint": "Print this sheet, cut the labels, and stick them on your products.",
-  "scan.showQr": "QR code"
+  "scan.showQr": "QR code",
+  "trends.changedMost": "What changed most",
+  "home.profitTitle": "Profit (estimated)",
+  "home.profitMargin": "{pct}% of sales kept",
+  "home.profitExplain": "Sales minus costs, including credit. “Left over” shows cash only.",
+  "home.spendingTitle": "Where money went",
+  "home.spendingSeeAll": "See full breakdown"
 }

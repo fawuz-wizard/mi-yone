@@ -314,3 +314,31 @@ def build_reply_facts(db: Session, business: Business, question: str) -> tuple[s
     if intent == "compare":
         return intent, _compare(db, business)
     return "help", [HELP_TEXT]
+
+
+def overview_line(db: Session, business: Business) -> dict | None:
+    """Partner one-line Overview summary (AI CONTEXT layer, Phase M17).
+
+    Says what changed over the last 30 days and names the largest MEASURED
+    contributor — contribution, never causation. Built from the same
+    deterministic trends the tiles show, so it cannot disagree with them.
+    Returns None when history is insufficient; the caller keeps its
+    deterministic top-expense insight instead. No provider call here: this is
+    grounded composition, and the chat Partner remains the place for phrased
+    conversation."""
+    t = analytics.trends(db, business.id, "30d")
+    metrics = {m["key"]: m for m in t["metrics"]}
+    lo = metrics["left_over"]
+    if lo["direction"] is None:
+        return None
+    word = {"up": "improved", "down": "declined", "flat": "held steady"}[lo["direction"]]
+    pct = f" ({lo['change_pct']}%)" if lo["change_pct"] else ""
+    contributors = t.get("contributors") or []
+    return {
+        "id": "ins-partner-overview",
+        "statement": f"What you kept {word}{pct} over the last 30 days.",
+        "figure": lo["current"],
+        "context": contributors[0]["text"] if contributors else "Compared with the 30 days before.",
+        "action_label": "Ask the Partner",
+        "action_target": "/partner",
+    }

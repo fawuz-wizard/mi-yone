@@ -41,6 +41,23 @@ export function TrendsRow() {
           ))}
         </div>
       </div>
+
+      {/* Contribution analysis (M17): the largest measured changes, phrased
+          factually by the server — contribution, never causation. */}
+      {(query.data?.contributors ?? []).length > 0 ? (
+        <div className="mt-2 rounded-card border border-border bg-surface px-4 py-3" data-testid="trend-contributors">
+          <h3 className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
+            {t("trends.changedMost")}
+          </h3>
+          <ul className="mt-1 space-y-1.5">
+            {(query.data?.contributors ?? []).map((c) => (
+              <li key={c.id} className="text-sm text-text-primary" data-testid="contributor-line">
+                {c.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }

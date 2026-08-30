@@ -337,8 +337,55 @@ export function dashboard(period: "today" | "week" | "month"): DashboardResponse
 
   const attention: AttentionItem[] = attentionItems();
 
+  // M17 parity — spending summary for the SELECTED period (top 3 categories).
+  const periodByCat = new Map<string, number>();
+  rows
+    .filter((t) => t.type === "EXPENSE")
+    .forEach((t) => periodByCat.set(t.category_name, (periodByCat.get(t.category_name) ?? 0) + t.amount.amount_minor));
+  const rankedCats = [...periodByCat.entries()].sort((a, b) => b[1] - a[1]);
+  const spending =
+    rankedCats.length > 0
+      ? {
+          total: formatMoney(moneyOut),
+          top: rankedCats.slice(0, 3).map(([name, v]) => ({ name, total: formatMoney(v) })),
+        }
+      : null;
+
+  // M17 parity — profit + margin from the SAME report() logic (never disagree
+  // with Reports; margin absent on a zero-revenue base).
+  const rep = report(period);
+  const bookedRev = rep.profit.booked_revenue.amount_minor;
+  const profitMinor = rep.profit.profit.amount_minor;
+  const profit =
+    moneyIn > 0 || moneyOut > 0 || bookedRev > 0
+      ? {
+          estimated: rep.profit.profit,
+          margin_pct: bookedRev > 0 ? ((profitMinor / bookedRev) * 100).toFixed(0) : null,
+        }
+      : null;
+
+  // M17 parity — Partner overview line upgrades the insight slot when history
+  // allows; otherwise the deterministic top-expense insight stands.
+  let finalInsight = insight;
+  const tr = computeTrends("30d");
+  const lo = tr.metrics.find((m) => m.key === "left_over");
+  if (lo && lo.direction !== null) {
+    const word = lo.direction === "up" ? "improved" : lo.direction === "down" ? "declined" : "held steady";
+    const pct = lo.change_pct !== null ? ` (${lo.change_pct}%)` : "";
+    finalInsight = {
+      id: "ins-partner-overview",
+      statement: `What you kept ${word}${pct} over the last 30 days.`,
+      figure: lo.current,
+      context: tr.contributors.length > 0 ? tr.contributors[0].text : "Compared with the 30 days before.",
+      action_label: "Ask the Partner",
+      action_target: "/partner",
+    };
+  }
+
   return {
     business,
+    spending,
+    profit,
     health: {
       period,
       money_in: formatMoney(moneyIn),
@@ -349,7 +396,7 @@ export function dashboard(period: "today" | "week" | "month"): DashboardResponse
       pending_count: 0, // pending records live client-side; the server never counts them (Phase 5 §26)
     },
     attention,
-    insight,
+    insight: finalInsight,
   };
 }
 
@@ -1309,6 +1356,64 @@ export function computeTrends(range: string): TrendsResponse {
     .reduce((a, t) => a + t.amount.amount_minor, 0);
   const outstandingStart = outstandingNow - newCredit + collected;
 
+  // Contribution analysis (M17) — parity with analytics.trends contributors:
+  // largest measured change per dimension; factual, never causal; withheld
+  // without history.
+  const contributors: { id: string; text: string }[] = [];
+  if (hasHistory) {
+    const curCat = new Map<string, number>();
+    const prevCat = new Map<string, number>();
+    txs.forEach((t) => {
+      if (t.type !== "EXPENSE") return;
+      const ts = at(t.occurred_at);
+      if (ts >= curStart) curCat.set(t.category_name, (curCat.get(t.category_name) ?? 0) + t.amount.amount_minor);
+      else if (ts >= prevStart) prevCat.set(t.category_name, (prevCat.get(t.category_name) ?? 0) + t.amount.amount_minor);
+    });
+    const catDeltas = [...new Set([...curCat.keys(), ...prevCat.keys()])]
+      .map((n): [string, number] => [n, (curCat.get(n) ?? 0) - (prevCat.get(n) ?? 0)])
+      .filter(([, d]) => d !== 0)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+    if (catDeltas.length > 0) {
+      const [n, d] = catDeltas[0];
+      contributors.push({
+        id: "contrib-spending",
+        text: `${n} spending ${d > 0 ? "increased" : "decreased"} by ${formatMoney(Math.abs(d)).display} — the largest change in your spending compared with the period before.`,
+      });
+    }
+    const curU = new Map<string, number>();
+    const prevU = new Map<string, number>();
+    movements.forEach((m) => {
+      if (m.type !== "SALE") return;
+      const ts = at(m.occurred_at);
+      if (ts >= curStart) curU.set(m.product_id, (curU.get(m.product_id) ?? 0) + Math.abs(m.quantity_delta));
+      else if (ts >= prevStart) prevU.set(m.product_id, (prevU.get(m.product_id) ?? 0) + Math.abs(m.quantity_delta));
+    });
+    const unitDeltas = [...new Set([...curU.keys(), ...prevU.keys()])]
+      .map((pid): [string, number] => [pid, (curU.get(pid) ?? 0) - (prevU.get(pid) ?? 0)])
+      .filter(([, d]) => d !== 0)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+    if (unitDeltas.length > 0) {
+      const [pid, d] = unitDeltas[0];
+      const p = productRows.find((r) => r.id === pid);
+      if (p) {
+        contributors.push({
+          id: "contrib-sales",
+          text: `${p.name} sold ${Math.abs(d)} ${d > 0 ? "more" : "fewer"} unit${Math.abs(d) !== 1 ? "s" : ""} than the period before — the biggest change in what you sold.`,
+        });
+      }
+    }
+    const dIn = curIn - prevIn;
+    const dOut = curOut - prevOut;
+    if (dIn !== 0 || dOut !== 0) {
+      const sideIn = Math.abs(dIn) >= Math.abs(dOut);
+      const d = sideIn ? dIn : dOut;
+      contributors.push({
+        id: "contrib-left-over",
+        text: `Money ${sideIn ? "in" : "out"} moved most: ${d > 0 ? "up" : "down"} ${formatMoney(Math.abs(d)).display} compared with the period before — the biggest influence on what you kept.`,
+      });
+    }
+  }
+
   return {
     range,
     metrics: [
@@ -1318,6 +1423,7 @@ export function computeTrends(range: string): TrendsResponse {
       trendMetric("units_sold", curUnits, prevUnits, String(curUnits), true, hasHistory),
       trendMetric("owed_to_you", outstandingNow, outstandingStart, formatMoney(outstandingNow).display, false, hasHistory && outstandingStart > 0),
     ],
+    contributors,
   };
 }
 

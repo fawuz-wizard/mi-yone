@@ -99,3 +99,32 @@ test("home with watch + trends passes the axe scan", async ({ page }) => {
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze();
   expect(results.violations).toEqual([]);
 });
+
+test("overview refinement: profit margin, spending summary, contributors, Partner line", async ({ page }) => {
+  await signIn(page);
+  // Month view is dense in the seed everywhere; today may be empty.
+  await page.getByRole("tab", { name: "This month" }).click();
+
+  // Estimated profit with a server-computed margin — rendered verbatim.
+  await expect(page.getByTestId("profit-row")).toContainText("Le");
+  await expect(page.getByTestId("profit-margin")).toContainText("%");
+
+  // Spending summary: top categories for the period + link to the full breakdown.
+  await expect(page.getByTestId("spending-card")).toBeVisible();
+  expect(await page.getByTestId("spending-category").count()).toBeGreaterThan(0);
+  await expect(page.getByTestId("spending-card")).toContainText("Le");
+  await expect(page.getByTestId("spending-see-all")).toBeVisible();
+
+  // Contribution analysis: factual "largest change" sentences, never causal.
+  const contribs = page.getByTestId("contributor-line");
+  expect(await contribs.count()).toBeGreaterThan(0);
+  for (const text of await contribs.allTextContents()) {
+    expect(text.toLowerCase()).not.toContain("caused");
+    expect(text.toLowerCase()).not.toContain("because");
+    expect(text).toMatch(/change|moved|influence/i);
+  }
+
+  // Partner overview line occupies the insight slot and hands off to the Partner.
+  await expect(page.getByText(/What you kept (improved|declined|held steady)/)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Ask the Partner/ })).toBeVisible();
+});

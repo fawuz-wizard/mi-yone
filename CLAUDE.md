@@ -92,7 +92,17 @@ rendering (stated dep reason), /labels print sheet + per-product QR sheet,
 features/scan (BarcodeDetector scanner w/ tap-to-add fallback, cart,
 idempotent multi-item checkout via NEW trade.checkout — SAME primitives,
 server-computed totals + hard stock validation), chooser gains Scan to sell.
-61 unit + 75 Playwright E2E green; 72 backend tests.
+Overview refinement (M17): dashboard payload gains period-scoped spending
+summary (top 3 expense categories) + profit with server-computed margin_pct
+(from the SAME report() logic as Reports; margin null on zero revenue);
+/analytics/trends gains `contributors` — largest measured change per dimension
+(spending category, product units, money in vs out), server-composed factual
+sentences, contribution NEVER causation, withheld without history;
+ai/evidence.overview_line() upgrades Home's insight slot to the Partner
+one-line summary when history allows (router-level, deterministic fallback
+stands otherwise); Home adds ProfitRow + SpendingCard (features/home/
+OverviewCards.tsx) and TrendsRow renders the contributors block.
+66 unit + 76 Playwright E2E green (vs mock AND real backend); 78 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

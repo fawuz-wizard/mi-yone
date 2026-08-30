@@ -8,6 +8,7 @@ import { api } from "@/shared/api/client";
 import type { DashboardResponse } from "@/shared/api/types";
 import { BUSINESS_ID } from "@/shared/api/session";
 import { HealthHeader, type Period } from "@/features/home/HealthHeader";
+import { ProfitRow, SpendingCard } from "@/features/home/OverviewCards";
 import { PerformanceChart } from "@/features/home/PerformanceChart";
 import { TrendsRow } from "@/features/home/TrendsRow";
 import { WatchSection } from "@/features/home/WatchSection";
@@ -75,6 +76,10 @@ export default function HomePage() {
         stale={query.isPlaceholderData}
       />
 
+      {/* Overview refinement (M17): estimated profit + margin for the selected
+          period, computed by the same logic as Reports. Self-hides when empty. */}
+      <ProfitRow profit={data.profit} />
+
       {/* Performance over time (owner-approved amendment to Phase 4 §17).
           Self-hides when the ledger is empty — no wall of zeros for a new business. */}
       <PerformanceChart />
@@ -86,7 +91,12 @@ export default function HomePage() {
           what happened, why it matters, what to consider doing. */}
       <WatchSection />
 
-      {/* One Partner insight (Phase 5 §35). */}
+      {/* Where the money went this period (M17) — summary only; Reports keeps
+          the full category breakdown. Self-hides with no expenses. */}
+      <SpendingCard spending={data.spending} />
+
+      {/* One Partner insight (Phase 5 §35) — now the Partner's overview line
+          when history allows, else the deterministic top-expense insight. */}
       {data.insight ? <InsightCard insight={data.insight} provenanceLabel={t("partner.fromRecords")} /> : null}
 
       {!hasRecords ? (
