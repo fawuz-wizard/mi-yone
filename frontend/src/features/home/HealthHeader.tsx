@@ -1,6 +1,9 @@
 "use client";
-// HealthHeader (Phase 5 §25–26): Money in · Money out · LEFT OVER (visual apex, NOT green).
-// Pending records are excluded from server figures — "+N waiting" says so.
+// HealthHeader (Phase 5 §25–26, refined per owner brief): LEFT OVER is the one
+// headline figure (visual apex, NOT green). The money in/out pair was removed
+// from this card — MI YONE records business events, it is not a wallet, and
+// those figures already live in the performance chart, trend tiles, Money tab
+// and Reports. Pending records are excluded from server figures — "+N waiting".
 import type { HealthPeriod } from "@/shared/api/types";
 import { MoneyDisplay } from "@/shared/design-system/MoneyDisplay";
 import { SegmentedTabs } from "@/shared/design-system/SegmentedTabs";
@@ -38,20 +41,6 @@ export function HealthHeader({
           { value: "month", label: t("home.month") },
         ]}
       />
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <div>
-          <p className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
-            {t("home.moneyIn")}
-          </p>
-          <MoneyDisplay money={health.money_in} direction="in" />
-        </div>
-        <div>
-          <p className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
-            {t("home.moneyOut")}
-          </p>
-          <MoneyDisplay money={health.money_out} direction="out" />
-        </div>
-      </div>
       <div className="mt-4 flex items-end justify-between gap-3">
         <div>
           <p className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">

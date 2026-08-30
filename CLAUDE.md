@@ -102,6 +102,12 @@ ai/evidence.overview_line() upgrades Home's insight slot to the Partner
 one-line summary when history allows (router-level, deterministic fallback
 stands otherwise); Home adds ProfitRow + SpendingCard (features/home/
 OverviewCards.tsx) and TrendsRow renders the contributors block.
+Owner refinement: the HealthHeader money-in/money-out pair was REMOVED from
+Home (business events, not a wallet; those figures stay in the performance
+chart, trend tiles, Money tab, Reports) — LEFT OVER is the sole headline;
+health.money_in/out remain in the API payload (Home's hasRecords logic uses
+them). The + FAB/chooser is the primary entry point (voice/text/manual/scan
+all pre-existing).
 66 unit + 76 Playwright E2E green (vs mock AND real backend); 78 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
