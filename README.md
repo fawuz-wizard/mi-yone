@@ -102,6 +102,14 @@ MIYONE_BACKEND_URL=http://localhost:8000 npx playwright test  # same suite vs re
 python -m pytest
 ```
 
+Backend tests use a SEPARATE database, `miyone_test`, which they wipe and
+rebuild on every test — deliberately isolated so they can never touch your
+real data. Create it once:
+
+```bash
+sudo -u postgres psql -c "CREATE DATABASE miyone_test OWNER miyone;"
+```
+
 The full Playwright suite passes unchanged against the mock **and** the real
 backend — keep it that way.
 
