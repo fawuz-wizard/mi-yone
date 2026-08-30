@@ -507,7 +507,24 @@ export function toProduct(row: ProductRow): Product {
     category: row.category ?? null,
     has_image: productImages.has(row.id),
     image_url: productImages.has(row.id) ? `/api/v1/businesses/b-demo-1/products/${row.id}/image` : null,
+    recent_prices: recentSalePrices(row.id),
   };
+}
+
+// Distinct unit prices from recent SALE movements, newest first (parity with
+// serializers.recent_sale_prices).
+function recentSalePrices(productId: string): Money[] {
+  const seen: number[] = [];
+  const rows = movements
+    .filter((m) => m.product_id === productId && m.type === "SALE" && m.unit_cost !== null)
+    .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
+    .slice(0, 10);
+  for (const m of rows) {
+    const v = m.unit_cost!.amount_minor;
+    if (v > 0 && !seen.includes(v)) seen.push(v);
+    if (seen.length >= 3) break;
+  }
+  return seen.map((v) => formatMoney(v));
 }
 
 export function listProducts(includeArchived = false): Product[] {
@@ -781,7 +798,9 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
   // Negative stock is allowed with a warning surface, not blocked (Phase 2 §10).
   const product = getProductRow(input.product_id);
   if (product && product.track) {
-    addMovement(product.id, "SALE", -(input.quantity ?? 1), null);
+    const qty = input.quantity ?? 1;
+    const unitValue = total % qty === 0 ? total / qty : null;
+    addMovement(product.id, "SALE", -qty, unitValue);
   }
 
   let transaction = null;
@@ -1478,7 +1497,7 @@ export function checkout(
   const total = lines.reduce((a, l) => a + l.row.selling_minor * l.quantity, 0);
   if (total <= 0) return { error: "This sale could not be recorded." };
 
-  for (const l of lines) if (l.row.track) addMovement(l.row.id, "SALE", -l.quantity, null);
+  for (const l of lines) if (l.row.track) addMovement(l.row.id, "SALE", -l.quantity, l.row.selling_minor);
   const description = lines.map((l) => `${l.row.name} ×${l.quantity}`).join(", ").slice(0, 500);
   const { transaction: tx } = createTransaction(
     { type: "INCOME", amount_minor: total, description, source: "SALE", entry_method: "scan" },

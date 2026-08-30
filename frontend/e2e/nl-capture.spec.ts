@@ -360,3 +360,43 @@ test("record provenance: a typed quick entry is stamped 'Typed' with a record nu
   await page.getByTestId("record-card").first().click();
   await expect(page.getByText("Form", { exact: true })).toBeVisible();
 });
+
+test("price history: differing recorded prices surface as a suggestion hint, never silently assumed", async ({ page }) => {
+  await signIn(page);
+
+  // A product of this test's own.
+  await page.getByRole("link", { name: "Stock" }).click();
+  await page.getByTestId("new-product").click();
+  await page.getByLabel("Product name").fill("Palm wine");
+  await page.getByTestId("price-selling").click();
+  for (const d of "5000") await page.getByRole("button", { name: d, exact: true }).click();
+  await page.getByTestId("price-selling-done").click();
+  await page.getByLabel(/How many do you have now/).fill("30");
+  await page.getByTestId("product-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Product saved");
+
+  // Sell it twice at DIFFERENT prices through the quick entry.
+  for (const [qty, price, total] of [["2", "4000", "Le 8,000"], ["1", "5000", "Le 5,000"]] as const) {
+    await page.getByTestId("fab-add").click();
+    await page.getByTestId("choose-money-in").click();
+    await page.getByTestId("nlc-input").fill(`Sold ${qty} palm wine at ${price} each`);
+    await page.getByTestId("nlc-fill").click();
+    await page.getByTestId("capture-save").click();
+    await expect(page.getByTestId("toast")).toContainText(`Saved · ${total}`);
+  }
+
+  // Manual sale: picking the product shows its actual recent prices beside
+  // the suggested price — the owner decides, nothing is assumed.
+  await page.getByTestId("fab-add").click();
+  await page.getByTestId("choose-money-in").click();
+  const chip = page.getByRole("radio", { name: /Palm wine/ });
+  if (await chip.isVisible().catch(() => false)) {
+    await chip.click();
+  } else {
+    await page.getByRole("button", { name: "More…" }).click();
+    await page.getByRole("button", { name: /Palm wine/ }).click();
+  }
+  await expect(page.getByTestId("recent-prices")).toContainText("Le 5,000");
+  await expect(page.getByTestId("recent-prices")).toContainText("Le 4,000");
+  await page.keyboard.press("Escape");
+});

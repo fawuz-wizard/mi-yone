@@ -109,3 +109,36 @@ def test_totals_stay_server_computed(client):
         headers={"Idempotency-Key": "rs-total-1"},
     )
     assert r.json()["data"]["total"]["amount_minor"] == 3 * p["selling_price"]["amount_minor"]
+
+
+def test_sale_movements_store_unit_price_and_products_expose_recent_prices(client):
+    pid = _product(client)["id"]
+    # Two sales at different unit prices → both become recorded price history.
+    for i, unit in enumerate((350_000, 370_000)):
+        r = client.post(
+            f"{BASE}/sales",
+            json={"amount_minor": unit * 2, "product_id": pid, "quantity": 2, "payment": "PAID"},
+            headers={"Idempotency-Key": f"rp-{i}"},
+        )
+        assert r.status_code == 201
+    p = next(x for x in client.get(f"{BASE}/products").json()["data"] if x["id"] == pid)
+    values = [m["amount_minor"] for m in p["recent_prices"]]
+    assert set(values) == {350_000, 370_000}
+    # Most recent first — the suggestion order.
+    assert values[0] == 370_000
+    with SessionLocal() as db:
+        mv = db.query(StockMovement).filter_by(product_id=pid, type="SALE").order_by(StockMovement.occurred_at.desc()).first()
+        assert mv.unit_cost_minor == 370_000
+
+
+def test_bundled_total_does_not_invent_a_unit_price(client):
+    pid = _product(client)["id"]
+    # Le 1,000.01 for 3 — no clean unit price; nothing is fabricated.
+    r = client.post(
+        f"{BASE}/sales",
+        json={"amount_minor": 100_001, "product_id": pid, "quantity": 3, "payment": "PAID"},
+        headers={"Idempotency-Key": "rp-odd"},
+    )
+    assert r.status_code == 201
+    p = next(x for x in client.get(f"{BASE}/products").json()["data"] if x["id"] == pid)
+    assert p["recent_prices"] == []

@@ -116,7 +116,14 @@ debt payloads → services; checkout is stamped "scan" server-side; record
 detail shows Entered/Entered by/Record no. A pre-Alembic ADDITIVE-ONLY
 startup shim (main.apply_additive_columns) upgrades existing databases in
 place — never drops, never rewrites.
-66 unit + 77 Playwright E2E green (vs mock AND real backend); 84 backend tests.
+Entry refinement (owner brief): SALE movements now store the unit price
+(unit_cost_minor = the movement's unit VALUE: cost for purchases, selling
+price for sales; only when the total divides cleanly — bundled totals never
+invent one); products expose `recent_prices` (distinct unit prices from
+recent sale movements, newest first) and the capture sheet shows a
+"Sold before at …" hint whenever recorded prices conflict with the price in
+use — suggest, never silently assume; old records are never rewritten.
+66 unit + 78 Playwright E2E green (vs mock AND real backend); 86 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

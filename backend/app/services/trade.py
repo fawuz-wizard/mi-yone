@@ -45,7 +45,13 @@ def create_sale(
     if product_id:
         product = db.scalar(select(Product).where(Product.id == product_id, Product.business_id == business_id))
     if product and product.track_inventory:
-        add_movement(db, business_id, product.id, actor, "SALE", -(quantity or 1), None)
+        # Store the unit price ON the movement (unit_cost_minor doubles as the
+        # movement's unit value: cost for purchases, selling price for sales) —
+        # this is the price HISTORY future suggestions read. Only when the
+        # total divides cleanly; a bundled price stays on the transaction.
+        qty = quantity or 1
+        unit_value = amount_minor // qty if amount_minor % qty == 0 else None
+        add_movement(db, business_id, product.id, actor, "SALE", -qty, unit_value)
 
     cash_tx = None
     if paid > 0:
@@ -134,7 +140,7 @@ def checkout(
 
     for line in lines:
         if line["product"].track_inventory:
-            add_movement(db, business_id, line["product"].id, actor, "SALE", -line["quantity"], None)
+            add_movement(db, business_id, line["product"].id, actor, "SALE", -line["quantity"], line["unit_minor"])
 
     description = ", ".join(f"{line['product'].name} ×{line['quantity']}" for line in lines)[:500]
     cash_tx, _ = create_transaction(

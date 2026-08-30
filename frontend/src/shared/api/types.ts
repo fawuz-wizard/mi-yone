@@ -201,6 +201,9 @@ export interface Product {
   category: string | null;
   has_image: boolean;
   image_url: string | null; // tenant-guarded API path, renderable in <img>
+  // Price history: distinct unit prices from recent recorded sales (newest
+  // first) — suggestion input only; the owner always has the final say.
+  recent_prices: Money[];
 }
 
 export type MovementType = "PURCHASE" | "SALE" | "ADJUSTMENT" | "DAMAGE";

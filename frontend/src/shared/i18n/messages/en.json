@@ -427,5 +427,6 @@
   "method.manual": "Form",
   "method.text": "Typed",
   "method.voice": "Voice",
-  "method.scan": "Scan"
+  "method.scan": "Scan",
+  "capture.recentPrices": "Sold before at {list}"
 }

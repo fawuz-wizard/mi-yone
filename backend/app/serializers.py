@@ -42,6 +42,26 @@ def stock_of(db: Session, product_id: str) -> int:
     )
 
 
+def recent_sale_prices(db: Session, product_id: str, limit: int = 3) -> list[int]:
+    """Distinct unit prices from the most recent SALE movements — the price
+    HISTORY behind entry suggestions. Read-only over recorded facts; old
+    records are never rewritten by a price change today."""
+    rows = db.scalars(
+        select(StockMovement)
+        .where(StockMovement.product_id == product_id, StockMovement.type == "SALE", StockMovement.unit_cost_minor.isnot(None))
+        .order_by(StockMovement.occurred_at.desc())
+        .limit(10)
+    )
+    seen: list[int] = []
+    for m in rows:
+        v = int(m.unit_cost_minor or 0)
+        if v > 0 and v not in seen:
+            seen.append(v)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
 def product_json(db: Session, p: Product) -> dict:
     stock = stock_of(db, p.id) if p.track_inventory else 0
     return {
@@ -61,6 +81,8 @@ def product_json(db: Session, p: Product) -> dict:
         "category": p.category,
         "has_image": p.image_key is not None,
         "image_url": f"/api/v1/businesses/{p.business_id}/products/{p.id}/image" if p.image_key else None,
+        # Price suggestion support: what this product ACTUALLY sold for lately.
+        "recent_prices": [format_money(v) for v in recent_sale_prices(db, p.id)],
     }
 
 

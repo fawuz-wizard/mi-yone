@@ -352,6 +352,22 @@ export function CaptureSheet({
                   </div>
                 </div>
               ) : null}
+              {(() => {
+                // Price-history hint (owner brief): when this product's RECENT
+                // recorded prices differ from the price being used, say so —
+                // suggest, never silently assume. The owner edits freely.
+                const product = products.data?.find((p) => p.id === productId);
+                const recents = product?.recent_prices ?? [];
+                const effectiveUnit = unitOverrideMinor ?? product?.selling_price.amount_minor ?? null;
+                const conflicting =
+                  recents.length > 0 && (recents.length > 1 || (effectiveUnit !== null && recents[0].amount_minor !== effectiveUnit));
+                if (!conflicting) return null;
+                return (
+                  <p className="mt-2 text-sm text-text-secondary" data-testid="recent-prices">
+                    {t("capture.recentPrices", { list: recents.map((r) => r.display).join(" · ") })}
+                  </p>
+                );
+              })()}
             </div>
           ) : null}
 
