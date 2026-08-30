@@ -51,7 +51,10 @@ def create_transaction(
     counterparty_id: str | None = None,
     source: str = "MANUAL",
     idempotency_key: str | None = None,
+    entry_method: str = "manual",
 ) -> tuple[Transaction, bool]:
+    if entry_method not in ("manual", "text", "voice", "scan"):
+        entry_method = "manual"
     if not isinstance(amount_minor, int) or amount_minor <= 0:
         raise ApiError(422, "VALIDATION_ERROR", "The amount is invalid.")
     if amount_minor > AMOUNT_CAP_MINOR:
@@ -74,6 +77,7 @@ def create_transaction(
         created_at=utcnow(),
         recorded_by=actor,
         source=source,
+        entry_method=entry_method,
         counterparty_id=counterparty_id,
         idempotency_key=idempotency_key,
     )

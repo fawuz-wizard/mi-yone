@@ -88,6 +88,8 @@ export interface InterpretIssue {
 }
 
 export interface InterpretedEntry {
+  /** How the phrase arrived — stamped by the entry surface, not the parser. */
+  origin?: "text" | "voice";
   understood: boolean;
   intent: EntryIntent | null; // null → ambiguous, ask the owner (never guess)
   // shared numbers

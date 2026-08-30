@@ -47,6 +47,7 @@ class AddStockInput(BaseModel):
     unit_cost_minor: int = Field(ge=0, le=100_000_000_000)
     paid: bool
     supplier_id: str | None = Field(default=None, max_length=40)
+    entry_method: str = Field(default="manual", pattern="^(manual|text|voice)$")
 
 
 class StockCheckInput(BaseModel):
@@ -130,6 +131,7 @@ def add_stock(product_id: str, body: AddStockInput, ctx: TenantContext = Depends
     p, m = inventory.add_stock(
         db, ctx.business.id, ctx.user.full_name, product_id,
         quantity=body.quantity, unit_cost_minor=body.unit_cost_minor, paid=body.paid, supplier_id=body.supplier_id,
+        entry_method=body.entry_method,
     )
     return ok({"product": product_json(db, p), "movement": movement_json(m)}, status_code=201)
 

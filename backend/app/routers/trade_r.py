@@ -22,6 +22,7 @@ class CreateSaleInput(BaseModel):
     amount_paid_minor: int | None = Field(default=None, ge=0, le=100_000_000_000)
     customer_id: str | None = Field(default=None, max_length=40)
     description: str | None = Field(default=None, max_length=500)
+    entry_method: str = Field(default="manual", pattern="^(manual|text|voice)$")
 
 
 class CheckoutItem(BaseModel):
@@ -37,6 +38,7 @@ class CreateDebtInput(BaseModel):
     counterparty_id: str = Field(max_length=40)
     amount_minor: int = Field(ge=1, le=100_000_000_000)
     note: str | None = Field(default=None, max_length=500)
+    entry_method: str = Field(default="manual", pattern="^(manual|text|voice)$")
 
 
 class SettlementInput(BaseModel):
@@ -55,6 +57,7 @@ def create_sale(
         amount_minor=body.amount_minor, product_id=body.product_id, quantity=body.quantity,
         payment=body.payment, amount_paid_minor=body.amount_paid_minor,
         customer_id=body.customer_id, description=body.description, idempotency_key=idempotency_key,
+        entry_method=body.entry_method,
     )
     return ok(
         {
@@ -116,7 +119,7 @@ def list_receivables(ctx: TenantContext = Depends(tenant), db: Session = Depends
 
 @router.post("/receivables")
 def create_receivable(body: CreateDebtInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
-    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "receivable", body.counterparty_id, body.amount_minor)
+    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "receivable", body.counterparty_id, body.amount_minor, entry_method=body.entry_method)
     return ok(debt_json(db, debt), status_code=201)
 
 
@@ -127,7 +130,7 @@ def list_payables(ctx: TenantContext = Depends(tenant), db: Session = Depends(ge
 
 @router.post("/payables")
 def create_payable(body: CreateDebtInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
-    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "payable", body.counterparty_id, body.amount_minor)
+    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "payable", body.counterparty_id, body.amount_minor, entry_method=body.entry_method)
     return ok(debt_json(db, debt), status_code=201)
 
 

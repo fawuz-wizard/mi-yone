@@ -108,7 +108,15 @@ chart, trend tiles, Money tab, Reports) — LEFT OVER is the sole headline;
 health.money_in/out remain in the API payload (Home's hasRecords logic uses
 them). The + FAB/chooser is the primary entry point (voice/text/manual/scan
 all pre-existing).
-66 unit + 76 Playwright E2E green (vs mock AND real backend); 78 backend tests.
+Record structure (owner brief): every business record carries a unique
+reference id, event time (occurred_at) vs recorded-at (created_at — now also
+on Sale/Debt/StockMovement), and entry_method provenance
+(manual/text/voice/scan) threaded from QuickEntry origin → capture/purchase/
+debt payloads → services; checkout is stamped "scan" server-side; record
+detail shows Entered/Entered by/Record no. A pre-Alembic ADDITIVE-ONLY
+startup shim (main.apply_additive_columns) upgrades existing databases in
+place — never drops, never rewrites.
+66 unit + 77 Playwright E2E green (vs mock AND real backend); 84 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

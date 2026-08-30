@@ -328,3 +328,35 @@ test("voice failure explains the cause: blocked mic vs unreachable speech servic
   await page.getByTestId("nlc-fill").click();
   await expect(page.getByTestId("nlc-summary")).toContainText("3 × Rice (50kg bag)");
 });
+
+test("record provenance: a typed quick entry is stamped 'Typed' with a record number; manual stays 'Form'", async ({ page }) => {
+  await signIn(page);
+
+  // Typed quick entry → sale recorded → its detail carries honest provenance.
+  await openSaleCapture(page);
+  await page.getByTestId("nlc-input").fill("Sold 2 bars of soap at 1500 each");
+  await page.getByTestId("nlc-fill").click();
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 3,000");
+
+  await page.getByRole("link", { name: "Money" }).click();
+  await page.getByRole("tab", { name: "In", exact: true }).click();
+  await page.getByTestId("record-card").filter({ hasText: "Soap (bar)" }).first().click();
+  await expect(page.getByText("Entered by")).toBeVisible();
+  await expect(page.getByText("Typed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Record no.")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Manual expense → detail says Form.
+  await page.getByTestId("fab-add").click();
+  await page.getByTestId("choose-money-out").click();
+  for (const d of "7000") await page.getByRole("button", { name: d, exact: true }).click();
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toBeVisible();
+
+  await page.getByRole("link", { name: "Money" }).click();
+  await page.getByRole("tab", { name: "Out", exact: true }).click();
+  // Newest record first — the expense just saved.
+  await page.getByTestId("record-card").first().click();
+  await expect(page.getByText("Form", { exact: true })).toBeVisible();
+});

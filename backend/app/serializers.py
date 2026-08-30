@@ -28,6 +28,7 @@ def tx_json(t: Transaction) -> dict:
         "created_at": iso(t.created_at),
         "recorded_by": t.recorded_by,
         "source": t.source,
+        "entry_method": t.entry_method,
         "counterparty_id": t.counterparty_id,
         "reverses_transaction_id": t.reverses_transaction_id,
         "fixed": fixed,

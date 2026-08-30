@@ -24,6 +24,7 @@ def create_sale(
     customer_id: str | None,
     description: str | None,
     idempotency_key: str | None,
+    entry_method: str = "manual",
 ) -> tuple[dict, bool]:
     if not isinstance(amount_minor, int) or amount_minor <= 0:
         raise ApiError(422, "VALIDATION_ERROR", "The amount is invalid.")
@@ -54,13 +55,14 @@ def create_sale(
             description=description or (product.name if product else None),
             counterparty_id=customer_id, source="SALE",
             idempotency_key=f"{idempotency_key}:cash" if idempotency_key else None,
+            entry_method=entry_method,
         )
     receivable = None
     if credit > 0:
         customer = db.scalar(select(Party).where(Party.id == customer_id, Party.business_id == business_id, Party.kind == "customer"))
         if customer is None:
             raise ApiError(422, "VALIDATION_ERROR", "This sale could not be recorded.")
-        receivable = Debt(id=gen_id("r"), business_id=business_id, kind="receivable", counterparty_id=customer.id, amount_minor=credit, settled_minor=0, since=utcnow(), due_date=None, source="SALE")
+        receivable = Debt(id=gen_id("r"), business_id=business_id, kind="receivable", counterparty_id=customer.id, amount_minor=credit, settled_minor=0, since=utcnow(), due_date=None, source="SALE", entry_method=entry_method)
         db.add(receivable)
 
     sale = Sale(
@@ -140,6 +142,7 @@ def checkout(
         type_="INCOME", amount_minor=total,
         description=description, counterparty_id=None, source="SALE",
         idempotency_key=f"{idempotency_key}:cash" if idempotency_key else None,
+        entry_method="scan",
     )
     sale = Sale(
         id=gen_id("s"),
@@ -178,12 +181,12 @@ def settle_debt(db: Session, business_id: str, actor: str, debt_id: str, amount_
     return debt, tx
 
 
-def add_manual_debt(db: Session, business_id: str, actor: str, kind: str, counterparty_id: str, amount_minor: int) -> Debt:
+def add_manual_debt(db: Session, business_id: str, actor: str, kind: str, counterparty_id: str, amount_minor: int, *, entry_method: str = "manual") -> Debt:
     party_kind = "customer" if kind == "receivable" else "supplier"
     party = db.scalar(select(Party).where(Party.id == counterparty_id, Party.business_id == business_id, Party.kind == party_kind))
     if party is None or not isinstance(amount_minor, int) or amount_minor <= 0:
         raise ApiError(422, "VALIDATION_ERROR", "This debt could not be recorded.")
-    debt = Debt(id=gen_id("r" if kind == "receivable" else "pay"), business_id=business_id, kind=kind, counterparty_id=party.id, amount_minor=amount_minor, settled_minor=0, since=utcnow(), due_date=None, source="MANUAL")
+    debt = Debt(id=gen_id("r" if kind == "receivable" else "pay"), business_id=business_id, kind=kind, counterparty_id=party.id, amount_minor=amount_minor, settled_minor=0, since=utcnow(), due_date=None, source="MANUAL", entry_method=entry_method if entry_method in ("manual", "text", "voice") else "manual")
     db.add(debt)
     audit(db, business_id, actor, "debt.manual", "debt", debt.id)
     db.flush()

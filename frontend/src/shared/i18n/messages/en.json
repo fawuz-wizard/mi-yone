@@ -420,5 +420,12 @@
   "home.profitMargin": "{pct}% of sales kept",
   "home.profitExplain": "Sales minus costs, including credit. “Left over” shows cash only.",
   "home.spendingTitle": "Where money went",
-  "home.spendingSeeAll": "See full breakdown"
+  "home.spendingSeeAll": "See full breakdown",
+  "detail.recordedAt": "Entered",
+  "detail.enteredVia": "Entered by",
+  "detail.reference": "Record no.",
+  "method.manual": "Form",
+  "method.text": "Typed",
+  "method.voice": "Voice",
+  "method.scan": "Scan"
 }

@@ -79,6 +79,9 @@ export function CaptureSheet({
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [dateStr, setDateStr] = useState(""); // "" = today (default; backdating optional)
   const [paidNow, setPaidNow] = useState<AmountState>(EMPTY_AMOUNT);
+  // Provenance of THIS capture: manual form by default; a routed quick entry
+  // stamps text/voice. Sent with the record, reset with the rest of the form.
+  const [entryMethod, setEntryMethod] = useState<"manual" | "text" | "voice">("manual");
   const [paidNowOpen, setPaidNowOpen] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   // When a quick entry stated its own unit price, the quantity stepper keeps
@@ -101,6 +104,7 @@ export function CaptureSheet({
     setPaidNowOpen(false);
     setConfirmDiscard(false);
     setUnitOverrideMinor(null);
+    setEntryMethod("manual");
   }, []);
 
   const handleClose = useCallback(() => {
@@ -124,6 +128,7 @@ export function CaptureSheet({
   // A sale phrase typed in the expense sheet (or vice versa) switches the kind.
   function applyInterpreted(r: InterpretedSale) {
     if (state.name === "IDLE") return;
+    setEntryMethod(r.origin ?? "text");
     setState({ name: "EDITING", kind: "sale", idempotencyKey: state.idempotencyKey });
     setAmount(r.totalMinor !== null ? fromMinor(r.totalMinor) : EMPTY_AMOUNT);
     setProductId(r.productId);
@@ -145,6 +150,7 @@ export function CaptureSheet({
   // Expense routed from the quick entry: switch the sheet to the expense form.
   function applyInterpretedExpense(r: InterpretedSale) {
     if (state.name === "IDLE") return;
+    setEntryMethod(r.origin ?? "text");
     setState({ name: "EDITING", kind: "expense", idempotencyKey: state.idempotencyKey });
     setAmount(r.totalMinor !== null ? fromMinor(r.totalMinor) : EMPTY_AMOUNT);
     setCategoryId(r.categoryId);
@@ -179,6 +185,7 @@ export function CaptureSheet({
           amount_paid_minor: payment === "OWES" && paidNowMinor > 0 ? paidNowMinor : undefined,
           customer_id: payment === "OWES" ? (customerId ?? undefined) : undefined,
           description: note || undefined,
+          entry_method: entryMethod,
         };
         return { kind: "sale" as const, result: await createSale.mutateAsync({ input, idempotencyKey }) };
       }
@@ -189,6 +196,7 @@ export function CaptureSheet({
         description: note || undefined,
         occurred_at: dateStr ? `${dateStr}T12:00:00` : undefined,
         source: "MANUAL" as const,
+        entry_method: entryMethod,
       };
       return { kind: "expense" as const, result: await createTx.mutateAsync({ input, idempotencyKey }) };
     };

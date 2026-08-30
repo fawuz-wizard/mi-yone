@@ -127,10 +127,15 @@ export function RecordDetailSheet({
           <DetailRow label={t("detail.when")} value={new Date(tx.occurred_at).toLocaleString("en-GB")} />
           <DetailRow label={t("detail.category")} value={tx.category_name} />
           <DetailRow label={t("detail.recordedBy")} value={tx.recorded_by} />
+          {tx.created_at ? (
+            <DetailRow label={t("detail.recordedAt")} value={new Date(tx.created_at).toLocaleString("en-GB")} />
+          ) : null}
+          <DetailRow label={t("detail.enteredVia")} value={t(`method.${tx.entry_method ?? "manual"}`)} />
           <DetailRow
             label={t("detail.source")}
             value={tx.source === "SALE" ? t("detail.sourceSale") : t("detail.sourceManual")}
           />
+          <DetailRow label={t("detail.reference")} value={tx.id} />
           {tx.fixed ? (
             <div className="rounded-card bg-sunken p-3" data-testid="fix-history">
               <p className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">

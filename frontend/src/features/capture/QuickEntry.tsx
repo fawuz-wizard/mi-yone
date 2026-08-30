@@ -75,6 +75,9 @@ export function QuickEntry({
   // Message id explaining what went wrong with the mic (null = nothing to say).
   const [micMessageId, setMicMessageId] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  // How the CURRENT phrase arrived — stamped onto every interpretation so the
+  // final record carries honest provenance (voice vs typed).
+  const originRef = useRef<"text" | "voice">("text");
 
   // Detect support after mount only (SSR renders without the mic → no hydration mismatch).
   useEffect(() => {
@@ -83,9 +86,10 @@ export function QuickEntry({
   }, []);
 
   const interpret = useCallback(
-    (raw: string, forced?: EntryIntent) => {
+    (raw: string, forced?: EntryIntent, origin?: "text" | "voice") => {
       const trimmed = raw.trim();
       if (!trimmed) return;
+      if (origin) originRef.current = origin;
       const r = interpretEntry(
         trimmed,
         {
@@ -101,11 +105,12 @@ export function QuickEntry({
         },
         forced,
       );
-      setResult(r);
+      const stamped = { ...r, origin: originRef.current };
+      setResult(stamped);
       setMicMessageId(null);
-      if (!r.understood) return;
-      if (r.intent === "sale") onApplySale(r);
-      else if (r.intent === "expense") onApplyExpense(r);
+      if (!stamped.understood) return;
+      if (stamped.intent === "sale") onApplySale(stamped);
+      else if (stamped.intent === "expense") onApplyExpense(stamped);
       // purchase / receivable / payable / ambiguous render their own cards below
     },
     [products, customers, suppliers, categories, recentTransactions, onApplySale, onApplyExpense],
@@ -141,7 +146,7 @@ export function QuickEntry({
       setListening(false);
       recognitionRef.current = null;
       const spoken = finalText.trim();
-      if (spoken) interpret(spoken);
+      if (spoken) interpret(spoken, undefined, "voice");
       else if (!errored) setMicMessageId("nlc.heardNothing");
     };
     // Say WHAT failed — a blocked mic, an unreachable speech service, and
@@ -198,7 +203,7 @@ export function QuickEntry({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                interpret(text);
+                interpret(text, undefined, "text");
               }
             }}
             placeholder={t("nlc.placeholder")}
@@ -221,7 +226,7 @@ export function QuickEntry({
           ) : null}
           <button
             type="button"
-            onClick={() => interpret(text)}
+            onClick={() => interpret(text, undefined, "text")}
             disabled={!text.trim() || listening}
             data-testid="nlc-fill"
             className="flex min-h-[48px] shrink-0 items-center rounded-input bg-sunken px-3 text-sm font-semibold disabled:opacity-40"
@@ -345,7 +350,7 @@ function PurchaseCard({
     try {
       await record.mutateAsync({
         productId,
-        input: { quantity: qty, unit_cost_minor: Math.round(costWhole * 100), paid, supplier_id: paid ? undefined : (supplierId ?? undefined) },
+        input: { quantity: qty, unit_cost_minor: Math.round(costWhole * 100), paid, supplier_id: paid ? undefined : (supplierId ?? undefined), entry_method: result.origin ?? "text" },
       });
       const name = products.find((p) => p.id === productId)?.name ?? "";
       onRecorded(t("stock.addedToast", { qty: String(qty), name }));
@@ -464,7 +469,7 @@ function DebtRecordCard({
     if (!canRecord || record.isPending || partyId === null || amountMinor === null) return;
     setErrorId(null);
     try {
-      const debt = await record.mutateAsync({ kind, counterparty_id: partyId, amount_minor: amountMinor });
+      const debt = await record.mutateAsync({ kind, counterparty_id: partyId, amount_minor: amountMinor, entry_method: result.origin ?? "text" });
       onRecorded(t("parties.debtAdded", { amount: debt.outstanding.display }));
     } catch (e) {
       setErrorId(isDomainError(e) ? e.messageId : "error.generic");

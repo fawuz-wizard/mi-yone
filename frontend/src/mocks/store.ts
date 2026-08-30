@@ -158,6 +158,7 @@ export function createTransaction(
     occurred_at?: string;
     counterparty_id?: string;
     source: Transaction["source"];
+    entry_method?: "manual" | "text" | "voice" | "scan";
   },
   idempotencyKey: string | null,
 ): { transaction: Transaction; replay: boolean } {
@@ -184,6 +185,7 @@ export function createTransaction(
     created_at: now,
     recorded_by: MOCK_USER,
     source: input.source,
+    entry_method: input.entry_method ?? "manual",
     counterparty_id: input.counterparty_id ?? null,
     reverses_transaction_id: null,
     fixed: null,
@@ -577,7 +579,7 @@ export function addStock(productId: string, input: AddStockInput): { product: Pr
   if (totalMinor > 0) {
     if (input.paid) {
       createTransaction(
-        { type: "EXPENSE", amount_minor: totalMinor, category_id: "cat-ex-stock", description: `${row.name} × ${input.quantity}`, source: "MANUAL" },
+        { type: "EXPENSE", amount_minor: totalMinor, category_id: "cat-ex-stock", description: `${row.name} × ${input.quantity}`, source: "MANUAL", entry_method: input.entry_method ?? "manual" },
         null,
       );
     } else {
@@ -791,6 +793,7 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
         description: input.description ?? product?.name,
         counterparty_id: input.customer_id,
         source: "SALE",
+        entry_method: input.entry_method ?? "manual",
       },
       idempotencyKey ? `${idempotencyKey}:cash` : null,
     ).transaction;
@@ -1478,7 +1481,7 @@ export function checkout(
   for (const l of lines) if (l.row.track) addMovement(l.row.id, "SALE", -l.quantity, null);
   const description = lines.map((l) => `${l.row.name} ×${l.quantity}`).join(", ").slice(0, 500);
   const { transaction: tx } = createTransaction(
-    { type: "INCOME", amount_minor: total, description, source: "SALE" },
+    { type: "INCOME", amount_minor: total, description, source: "SALE", entry_method: "scan" },
     idempotencyKey ? `${idempotencyKey}:cash` : null,
   );
   saleLog.push({ at: new Date().toISOString(), total_minor: total });

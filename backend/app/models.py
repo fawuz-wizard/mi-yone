@@ -90,6 +90,9 @@ class Transaction(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     recorded_by: Mapped[str] = mapped_column(String(120))
     source: Mapped[str] = mapped_column(String(12), default="MANUAL")  # MANUAL/SALE/SETTLEMENT
+    # HOW the record was entered (owner-facing provenance): manual/text/voice/scan.
+    # Distinct from `source`, which says WHICH subsystem posted it.
+    entry_method: Mapped[str] = mapped_column(String(8), default="manual")
     counterparty_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     reverses_transaction_id: Mapped[str | None] = mapped_column(String(40), nullable=True, unique=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
@@ -130,6 +133,7 @@ class StockMovement(Base):
     quantity_delta: Mapped[int] = mapped_column(Integer)
     unit_cost_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)  # when ENTERED (vs occurred)
     recorded_by: Mapped[str] = mapped_column(String(120))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -160,6 +164,8 @@ class Debt(Base):
     since: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source: Mapped[str] = mapped_column(String(10), default="MANUAL")  # SALE/MANUAL/PURCHASE
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)  # when ENTERED (vs since)
+    entry_method: Mapped[str] = mapped_column(String(8), default="manual")  # manual/text/voice/scan
     __table_args__ = (CheckConstraint("settled_minor <= amount_minor", name="ck_debt_no_oversettle"),)
 
 
@@ -171,6 +177,7 @@ class Sale(Base):
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
     total_minor: Mapped[int] = mapped_column(BigInteger)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)  # when ENTERED (vs occurred)
     idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     cash_transaction_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     receivable_id: Mapped[str | None] = mapped_column(String(40), nullable=True)

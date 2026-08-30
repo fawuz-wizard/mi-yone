@@ -30,6 +30,7 @@ class CreateTransactionInput(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     occurred_at: str | None = Field(default=None, max_length=40)
     source: str = Field(default="MANUAL", pattern="^(MANUAL|SALE)$")
+    entry_method: str = Field(default="manual", pattern="^(manual|text|voice)$")
 
 
 class FixInput(BaseModel):
@@ -75,6 +76,7 @@ def create_transaction(
         description=body.description, occurred_at=body.occurred_at,
         source=body.source,
         idempotency_key=idempotency_key,
+        entry_method=body.entry_method,
     )
     return ok(tx_json(t), status_code=200 if replay else 201)
 

@@ -25,6 +25,7 @@ export interface Transaction {
   created_at: string;
   recorded_by: string;
   source: TransactionSource;
+  entry_method?: "manual" | "text" | "voice" | "scan"; // HOW it was entered (owner provenance)
   counterparty_id: string | null; // customer/supplier this row concerns, when known
   reverses_transaction_id: string | null;
   fixed?: { by: string; was: Money; now: Money } | null;
@@ -251,6 +252,7 @@ export interface PhotoSuggestions {
 export interface AddStockInput {
   quantity: number;
   unit_cost_minor: number;
+  entry_method?: "manual" | "text" | "voice";
   paid: boolean; // false → creates a payable to the supplier
   supplier_id?: string; // required when paid=false
 }
@@ -312,6 +314,7 @@ export interface CreateSaleInput {
   amount_paid_minor?: number; // for PARTIAL
   customer_id?: string; // required for CREDIT/PARTIAL
   description?: string;
+  entry_method?: "manual" | "text" | "voice";
 }
 
 export interface SaleResult {
@@ -380,6 +383,7 @@ export interface CreateTransactionInput {
   description?: string;
   occurred_at?: string; // backdating allowed; created_at never lies (Phase 2 §7)
   source: TransactionSource;
+  entry_method?: "manual" | "text" | "voice";
 }
 
 export interface FixTransactionInput {

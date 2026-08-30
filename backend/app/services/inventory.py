@@ -35,7 +35,7 @@ def add_movement(db: Session, business_id: str, product_id: str, actor: str, typ
     return m
 
 
-def add_stock(db: Session, business_id: str, actor: str, product_id: str, *, quantity: int, unit_cost_minor: int, paid: bool, supplier_id: str | None) -> tuple[Product, StockMovement]:
+def add_stock(db: Session, business_id: str, actor: str, product_id: str, *, quantity: int, unit_cost_minor: int, paid: bool, supplier_id: str | None, entry_method: str = "manual") -> tuple[Product, StockMovement]:
     """One action: PURCHASE movement + expense (paid) or supplier payable (owed)."""
     p = get_product(db, business_id, product_id, include_archived=False)
     if quantity <= 0 or unit_cost_minor < 0:
@@ -55,12 +55,13 @@ def add_stock(db: Session, business_id: str, actor: str, product_id: str, *, qua
                 db, business_id, actor,
                 type_="EXPENSE", amount_minor=total, description=f"{p.name} × {quantity}",
                 category_id=stock_cat.id if stock_cat else None, source="MANUAL",
+                entry_method=entry_method,
             )
         else:
             supplier = db.scalar(select(Party).where(Party.id == supplier_id, Party.business_id == business_id, Party.kind == "supplier"))
             if supplier is None:
                 raise ApiError(422, "VALIDATION_ERROR", "This stock entry could not be recorded.")
-            db.add(Debt(id=gen_id("pay"), business_id=business_id, kind="payable", counterparty_id=supplier.id, amount_minor=total, settled_minor=0, since=utcnow(), due_date=None, source="PURCHASE"))
+            db.add(Debt(id=gen_id("pay"), business_id=business_id, kind="payable", counterparty_id=supplier.id, amount_minor=total, settled_minor=0, since=utcnow(), due_date=None, source="PURCHASE", entry_method=entry_method if entry_method in ("manual", "text", "voice") else "manual"))
     audit(db, business_id, actor, "stock.add", "product", product_id, f"+{quantity}")
     return p, m
 
