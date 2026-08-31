@@ -92,6 +92,12 @@ suite requires a flag-on build.)
 
 ## Optional environment variables (backend)
 
+**The frontend needs an API told to it explicitly.** `MIYONE_BACKEND_URL=...`
+runs against FastAPI; `MIYONE_MOCK_API=on` runs the in-repo mock, which has **no
+authentication and no separation between businesses** and is for development and
+testing only. With neither set the app refuses to start rather than quietly
+serving an open API.
+
 All AI/integration features degrade honestly when unconfigured — nothing is faked.
 
 | Variable | Effect when set |

@@ -184,6 +184,8 @@ export function QuickEntry({
       have: issue.params?.have ?? "",
       computed: group(issue.params?.computed ?? ""),
       stated: group(issue.params?.stated ?? ""),
+      each: issue.params?.each ?? "",
+      total: issue.params?.total ?? "",
     });
 
   const showSaleSummary =
