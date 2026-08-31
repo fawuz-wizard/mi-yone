@@ -162,7 +162,30 @@ sessions list + sign-out-others), Sign out (confirm → logout → clears
 business id → /welcome). App identity now resolves CLIENT-side from /auth/me
 (shared/api/me.ts — fixed the shell reading the MOCK business name in real
 mode). Full mock parity.
-68 unit + 86 Playwright E2E green (vs mock AND real backend); 103 backend tests.
+Partner advisor + market research (owner brief): the Partner now answers from
+THREE clearly separated knowledge lanes, and every answer block carries its own
+provenance label from the evidence layer to the screen —
+  records  (ai/evidence.py, deterministic, unchanged),
+  guidance (app/advice/playbook.json — HUMAN-authored business practice,
+            rendered VERBATIM; no model rewrites it; contains no figures,
+            prices or statistics, enforced by test),
+  web      (app/research/provider.py — Phase 2's reserved research port; default
+            provider is honestly unavailable, Anthropic web-search adapter
+            env-gated via MIYONE_RESEARCH_PROVIDER; NO SOURCES = NO ANSWER),
+plus a "note" lane for the Partner describing its own limits (no provenance
+label — it is not a knowledge claim). New intents: advice, decision (records +
+guidance + a two-sided weighing that never issues an order), research.
+route_mode() picks the lane deterministically; explicit "the web" toggle
+overrides. AIMessage gains mode + blocks_json so a past answer keeps the labels
+and sources it was given with. The Krio vocabulary moved to ai/lang.json and the
+guidance pack to advice/playbook.json — BOTH are copied into
+frontend/src/mocks/ and a vitest fails the build if they drift, so there is one
+vocabulary and one playbook, not two. Partner UI gains the design-spec §22.3
+mode toggle, per-block cards (consecutive same-lane blocks group into one card
+with one label), a sources block with dates, and voice input via the new
+shared/speech.ts (extracted from capture — features still never import each
+other). Only the RECORDS lane is ever phrased by the AI provider.
+74 unit + 93 Playwright E2E green (vs mock AND real backend); 116 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable
@@ -173,8 +196,9 @@ server-side CSV. 14 pytest green. Seed: `python -m app.seed`
 `MIYONE_BACKEND_URL` is set (unset = in-repo mock for dev). The FULL Playwright
 suite passes unchanged against the real backend — keep it that way.
 
-Not built yet: Setup flow UI (backend /auth/register exists), Partner/Research
-shell (AI phase), Settings/People/Help, Alembic initial migration (required
-before production deploy), rate limiting, email transport, durable offline
-queue (GATED on approved technical design — do not build it). Open owner
-decisions: logo art, Partner final name, Insights→Reports rename.
+Not built yet: Alembic initial migration (required before production deploy),
+email transport, durable offline queue (GATED on approved technical design — do
+not build it), async research jobs (deliberately deferred: research is
+synchronous and lives in the conversation feed; Phase 2's research_requests
+status machine is not built until a real worker exists). Open owner decisions:
+logo art, Partner final name, Insights→Reports rename, research provider key.

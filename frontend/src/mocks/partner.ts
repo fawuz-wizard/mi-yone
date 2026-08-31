@@ -11,14 +11,100 @@ import {
   report,
   visibleTransactions,
 } from "./store";
-import type { Product } from "@/shared/api/types";
+import type { PartnerBlock, PartnerSource, Product } from "@/shared/api/types";
+import playbookPack from "./playbook.json";
+import langPack from "./lang.json";
 
 export interface PartnerMessage {
   id: string;
   role: "owner" | "partner";
   text: string;
   intent: string | null;
+  mode: "business" | "advice" | "research";
+  blocks: PartnerBlock[];
   created_at: string;
+}
+
+// MOCK parity with backend app/advice + app/research. The guidance pack is a
+// COPY of backend/app/advice/playbook.json — partner.playbook.test.ts fails if
+// the two ever drift, so there is one source of advisory truth.
+type PlaybookTopic = { title: string; practices: string[]; watch_out?: string };
+const TOPICS = playbookPack.topics as unknown as Record<string, PlaybookTopic>;
+
+const TOPIC_KEYWORDS: [string, string[]][] = [
+  ["debt_collection", ["owe", "owes", "owed", "debt", "debts", "collect", "chase"]],
+  ["pricing", ["price", "prices", "pricing", "charge", "expensive", "cheap"]],
+  ["whatsapp_marketing", ["whatsapp", "advertise", "advertising", "marketing", "promote", "promotion", "status"]],
+  ["stock_management", ["stock", "restock", "inventory", "shelf", "supply", "spoil"]],
+  ["reduce_expenses", ["reduce", "cut", "lower", "save", "expenses", "expense", "cost", "costs", "spending"]],
+  ["attract_customers", ["attract", "bring", "customers", "customer", "people", "market"]],
+  ["customer_retention", ["keep", "retain", "loyal", "return", "returning", "again"]],
+  ["new_products", ["add", "new", "product", "products", "line", "stocking"]],
+  ["cash_flow", ["cash", "flow", "afford", "borrow"]],
+  ["record_keeping", ["record", "records", "book", "books", "track", "keeping"]],
+  ["growth", ["grow", "growth", "expand", "expansion", "bigger", "plan", "planning", "strategy", "future"]],
+  ["increase_sales", ["increase", "boost", "improve", "sales", "sell", "selling"]],
+];
+const DOMINANT_KEYWORDS: Record<string, string> = {
+  whatsapp: "whatsapp_marketing", price: "pricing", prices: "pricing", pricing: "pricing",
+  restock: "stock_management", credit: "debt_collection", spoil: "stock_management",
+};
+const ADVICE_TRIGGERS = [
+  "advice", "advise", "suggest", "suggestion", "idea", "ideas", "tip", "tips",
+  "strategy", "recommend", "help me", "should i do", "can i do", "i can do",
+  "how can i", "how i can", "how do i", "how to", "what do successful",
+  "best practice", "best practices", "what works", "i will market",
+  "market my", "grow my", "improve my", "better my", "attract",
+];
+const RESEARCH_TRIGGERS = [
+  "research", "look up", "search for", "market price", "market prices",
+  "going rate", "people buying", "people buy", "customers buying",
+  "what is the price of", "current price", "market trend", "market trends",
+  "competitor", "competitors", "industry", "trending", "in demand",
+  "businesses doing", "shops doing", "businesses are doing", "other shops",
+];
+const DECISION_VERBS = ["buy", "restock", "stock", "increase", "raise", "reduce", "lower", "drop", "add", "sell", "expand", "open", "borrow", "hire", "invest", "order"];
+
+const SITUATION_OF: Record<string, string> = {
+  reduce_expenses: "expenses", cash_flow: "expenses", debt_collection: "debts",
+  stock_management: "stock_why", new_products: "top_products", pricing: "top_products",
+};
+
+// MOCK parity with backend research/provider.py: no provider is configured in
+// the mock, so research is honestly unavailable — it never invents a market.
+const RESEARCH_AVAILABLE = false;
+const UNAVAILABLE_TEXT =
+  "I can't verify that information right now — market research isn't switched on for this business yet, " +
+  "and I won't guess at prices or market facts. What I can do is answer from your own records, or give " +
+  "you general business guidance.";
+
+export { normalizeQ };
+
+export function matchTopic(normalized: string, fallback = "increase_sales"): string {
+  const words = new Set(normalized.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(Boolean));
+  for (const [word, topic] of Object.entries(DOMINANT_KEYWORDS)) if (words.has(word)) return topic;
+  let best = fallback;
+  let bestScore = 0;
+  for (const [topic, keys] of TOPIC_KEYWORDS) {
+    const score = keys.filter((k) => words.has(k)).length;
+    if (score > bestScore) { best = topic; bestScore = score; }
+  }
+  return best;
+}
+
+export function renderGuidance(topic: string): string {
+  const t = TOPICS[topic];
+  const lines = [`${t.title}:`, ...t.practices.map((p) => `• ${p}`)];
+  if (t.watch_out) lines.push(`Worth remembering: ${t.watch_out}`);
+  return lines.join("\n");
+}
+
+function routeMode(normalized: string, words: Set<string>): "research" | "decision" | "advice" | null {
+  if (RESEARCH_TRIGGERS.some((t) => normalized.includes(t))) return "research";
+  if (words.has("should") && DECISION_VERBS.some((v) => words.has(v)) && !["focus", "attention", "worry"].some((w) => words.has(w)))
+    return "decision";
+  if (ADVICE_TRIGGERS.some((t) => normalized.includes(t))) return "advice";
+  return null;
 }
 
 const messages: PartnerMessage[] = [];
@@ -42,20 +128,11 @@ function productTokens(p: Product): Set<string> {
 
 // MOCK parity with backend ai/lang.py — Krio/business normalization applied
 // before routing so English, Krio, and mixed questions route identically.
-const PHRASE_MAP: [string, string][] = [
-  ["dey go", "doing"], ["de go", "doing"], ["dey do", "doing"], ["de do", "doing"], ["dey waka", "doing"],
-  ["sell pass", "best selling"], ["sel pass", "best selling"], ["sell pas", "best selling"],
-  ["don go down", "decreased"], ["don drop", "dropped"], ["go down", "down"],
-  ["make am", "make it"], ["from am", "from it"], ["pan am", "on it"],
-  ["na how much", "is how much"], ["owe me", "owes me"],
-];
-const TOKEN_MAP: Record<string, string> = {
-  wetin: "what", watin: "what", uden: "who", udat: "who", aw: "how", moni: "money",
-  bisness: "business", bizness: "business", dis: "this", dat: "that", las: "last",
-  mun: "month", wik: "week", na: "is", don: "", dey: "", de: "", fo: "for", pan: "on",
-  am: "it", ah: "i", a: "i", sel: "sell", spen: "spend", lef: "left", pas: "most",
-  kompia: "compare", kredit: "credit", kustoma: "customer", stok: "stock", prodok: "product",
-};
+// lang.json is a COPY of backend/app/ai/lang.json; partner.playbook.test.ts
+// fails the build if they drift, so there is one vocabulary, not two.
+const PHRASE_MAP: [string, string][] = Object.entries(langPack.phrases as Record<string, string>);
+const TOKEN_MAP: Record<string, string> = langPack.tokens as Record<string, string>;
+
 function normalizeQ(text: string): string {
   let t = " " + text.toLowerCase().trim() + " ";
   for (const [phrase, repl] of [...PHRASE_MAP].sort((x, y) => y[0].length - x[0].length)) {
@@ -300,11 +377,7 @@ function compare(): string[] {
   return facts;
 }
 
-export function partnerHistory(): { messages: PartnerMessage[]; provider: string } {
-  return { messages: [...messages].slice(-50), provider: "local" };
-}
-
-export function partnerAsk(text: string): { owner: PartnerMessage; partner: PartnerMessage } {
+function recordsAnswer(text: string): { intent: string; product: Product | null; facts: string[] } {
   let { intent, product } = route(text);
   // MOCK parity with backend resolve_context (§11): short follow-ups inherit
   // the previous answer's subject.
@@ -321,7 +394,6 @@ export function partnerAsk(text: string): { owner: PartnerMessage; partner: Part
       intent = "product"; product = lastContext.product;
     }
   }
-  lastContext = { intent, product };
   let facts: string[];
   switch (intent) {
     case "overview": facts = overview(text); break;
@@ -335,8 +407,120 @@ export function partnerAsk(text: string): { owner: PartnerMessage; partner: Part
     case "compare": facts = compare(); break;
     default: facts = [HELP_TEXT];
   }
-  const owner: PartnerMessage = { id: mid(), role: "owner", text, intent: null, created_at: new Date().toISOString() };
-  const partner: PartnerMessage = { id: mid(), role: "partner", text: facts.join("\n\n"), intent, created_at: new Date().toISOString() };
+  return { intent, product, facts };
+}
+
+export function partnerHistory(): { messages: PartnerMessage[]; provider: string; research_available: boolean } {
+  return { messages: [...messages].slice(-50), provider: "local", research_available: RESEARCH_AVAILABLE };
+}
+
+const block = (source: PartnerSource, text: string): PartnerBlock => ({ source, text });
+
+function situationBlocks(normalized: string, topic: string, product: Product | null): PartnerBlock[] {
+  if (product) return productFacts(product).map((f) => block("records", f));
+  let facts: string[];
+  if (normalized.includes("compare") || normalized.includes("last month")) facts = compare();
+  else
+    switch (SITUATION_OF[topic]) {
+      case "expenses": facts = expenses(); break;
+      case "debts": facts = debtsFacts(); break;
+      case "stock_why": facts = stockWhy(); break;
+      case "top_products": facts = topProducts(); break;
+      default: facts = overview(normalized);
+    }
+  return facts.map((f) => block("records", f));
+}
+
+function adviceBlocks(normalized: string, product: Product | null): PartnerBlock[] {
+  const topic = matchTopic(normalized);
+  return [
+    ...situationBlocks(normalized, topic, product),
+    block("guidance", renderGuidance(topic)),
+    block("note", "If you want current market information on this, ask me to research it — I'll show you where it came from."),
+  ];
+}
+
+function decisionBlocks(normalized: string, product: Product | null): PartnerBlock[] {
+  const topic = matchTopic(normalized, "stock_management");
+  const blocks = situationBlocks(normalized, topic, product);
+  if (product && product.track_inventory) {
+    const now = Date.now();
+    const at = (iso: string) => new Date(iso).getTime();
+    const moves = productMovements(product.id).filter((m) => m.type === "SALE");
+    const sold = moves.filter((m) => at(m.occurred_at) >= now - 30 * 86400000).reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+    const prev = moves
+      .filter((m) => at(m.occurred_at) >= now - 60 * 86400000 && at(m.occurred_at) < now - 30 * 86400000)
+      .reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+    const low = product.stock <= product.low_stock_threshold;
+    let weigh: string;
+    if (low && sold > 0) {
+      weigh = `Weighing it up: ${product.name} is at or below your low-stock level and it has been selling, so running out is a real risk. Against that, restocking ties up cash — check what you owe suppliers this week before you commit.`;
+    } else if (!low && prev > sold) {
+      weigh = `Weighing it up: you still have ${product.stock} ${product.unit} and it sold slower than the month before, so there's no urgency in your records. Money spent here is money not available for what is moving.`;
+    } else {
+      weigh = "Weighing it up: your records don't show an urgent shortage. The question is whether the cash is better used here or on what is selling faster right now — that part is your call.";
+    }
+    blocks.push(block("records", weigh));
+  } else {
+    blocks.push(block("records", "I can only weigh this against what your records actually show. If the figures above don't cover the decision, tell me what else you're comparing and I'll look at that too."));
+  }
+  blocks.push(block("guidance", renderGuidance(topic)));
+  return blocks;
+}
+
+function researchBlocks(normalized: string): PartnerBlock[] {
+  const blocks: PartnerBlock[] = [];
+  if (["my business", "my shop", "compare", "my sales"].some((n) => normalized.includes(n))) {
+    blocks.push(...overview(normalized).map((f) => block("records", f)));
+  }
+  if (!RESEARCH_AVAILABLE && blocks.length === 0 && ["buy", "buying", "sell", "selling", "product", "products", "move", "moving"].some((n) => normalized.includes(n))) {
+    blocks.push(block("records", "I can't tell you what the wider market is buying, but I can tell you what is moving in your own shop:"));
+    blocks.push(...topProducts().map((f) => block("records", f)));
+  }
+  blocks.push(block("note", UNAVAILABLE_TEXT));
+  return blocks;
+}
+
+export function partnerAsk(text: string, mode: "auto" | "business" | "research" = "auto"): { owner: PartnerMessage; partner: PartnerMessage } {
+  const asked = mode === "research" ? `research ${text}` : text;
+  const normalized = normalizeQ(asked);
+  const words = new Set(normalized.split(" ").filter(Boolean));
+  const lane = routeMode(normalized, words);
+
+  let answerMode: PartnerMessage["mode"] = "business";
+  let intent: string;
+  let product: Product | null = null;
+  let blocks: PartnerBlock[];
+
+  if (lane === "research") {
+    answerMode = "research";
+    intent = "research";
+    blocks = researchBlocks(normalized);
+  } else if (lane === "advice" || lane === "decision") {
+    answerMode = "advice";
+    let matched: Product | null = null;
+    let best = 0;
+    for (const p of listProducts(false)) {
+      const score = [...productTokens(p)].filter((t) => words.has(t)).length;
+      if (score > best) { best = score; matched = p; }
+    }
+    if (!matched) matched = lastContext.product;
+    product = matched;
+    intent = lane === "decision" ? "decision" : "advice";
+    blocks = lane === "decision" ? decisionBlocks(normalized, matched) : adviceBlocks(normalized, matched);
+  } else {
+    const routed = recordsAnswer(asked);
+    intent = routed.intent;
+    product = routed.product;
+    blocks = routed.facts.map((f) => block("records", f));
+  }
+
+  lastContext = { intent, product };
+  const owner: PartnerMessage = { id: mid(), role: "owner", text, intent: null, mode: answerMode, blocks: [], created_at: new Date().toISOString() };
+  const partner: PartnerMessage = {
+    id: mid(), role: "partner", text: blocks.map((b) => b.text).join("\n\n"),
+    intent, mode: answerMode, blocks, created_at: new Date().toISOString(),
+  };
   messages.push(owner, partner);
   return { owner, partner };
 }

@@ -218,6 +218,13 @@ class AIMessage(Base):
     role: Mapped[str] = mapped_column(String(10))  # "owner" | "partner"
     text: Mapped[str] = mapped_column(Text)
     intent: Mapped[str | None] = mapped_column(String(30), nullable=True)  # provenance
+    # Which knowledge lane produced this answer: "business" (the owner's
+    # records), "advice" (curated guidance), "research" (external sources).
+    mode: Mapped[str] = mapped_column(String(10), default="business")
+    # Per-block provenance + research sources, stored as JSON text so a past
+    # answer keeps the labels and links it was given with (design spec §24:
+    # stale results stay honestly dated rather than silently refreshed).
+    blocks_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 

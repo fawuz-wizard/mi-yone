@@ -1,0 +1,126 @@
+{
+  "version": "1.0",
+  "note": "Human-authored general business guidance for small shops. This file is the ONLY source of advisory text in MI YONE. It contains no prices, no percentages, no market claims and no statistics — those can only come from the owner's records or from labelled market research. Grow it by editing this file; nothing else changes.",
+  "topics": {
+    "attract_customers": {
+      "title": "Bringing in new customers",
+      "practices": [
+        "Tell people what you sell where they already are — a WhatsApp status, a church or mosque group, the market women you buy from.",
+        "Ask every satisfied customer to bring one person; a small thank-you for the person who refers works better than a discount for everyone.",
+        "Keep your busiest items visible from the road or the front of the shop.",
+        "Be open at the hours your customers can actually come, even if that means shifting your day."
+      ],
+      "watch_out": "New customers cost more effort than keeping the ones you have — do both, but never at the cost of your regulars."
+    },
+    "increase_sales": {
+      "title": "Selling more to the people already coming",
+      "practices": [
+        "Look at what sells best and make sure it is never out of stock — an empty shelf is a sale walking away.",
+        "Put items that go together side by side so one purchase suggests the next.",
+        "Offer a slightly larger size or a bundle at a price that still protects your margin.",
+        "Greet returning customers by name and remember what they usually buy."
+      ],
+      "watch_out": "Selling more at a thin margin can leave you with less than before — check what you keep, not only what comes in."
+    },
+    "reduce_expenses": {
+      "title": "Bringing costs down",
+      "practices": [
+        "Record every cost for a full month first — you cannot cut what you have not measured.",
+        "Look at your largest cost category before the small ones; the same effort saves more there.",
+        "Ask your regular suppliers for a better rate on the items you buy most often, or buy those together with another trader.",
+        "Separate costs that earn money (stock, transport to market) from costs that only leak (waste, spoilage, avoidable trips)."
+      ],
+      "watch_out": "Cutting stock or transport too hard can cost you sales — trim waste before you trim supply."
+    },
+    "whatsapp_marketing": {
+      "title": "Using WhatsApp to sell",
+      "practices": [
+        "Keep a business catalogue with a clear photo, name and price for each item so customers can browse without asking.",
+        "Post your new arrivals as a status rather than messaging everyone individually.",
+        "Reply quickly during the hours you say you are open, and say plainly when you are closed.",
+        "Save regular customers' numbers with what they usually buy so you can tell the right people about the right stock."
+      ],
+      "watch_out": "Broadcasting too often makes people mute you — post when you have something real to say."
+    },
+    "pricing": {
+      "title": "Setting and reviewing prices",
+      "practices": [
+        "Start from what the item costs you delivered into the shop, not from what a neighbour charges.",
+        "Review prices when your buying cost changes, not on a fixed timetable.",
+        "If you must raise a price, raise it once and explain it plainly rather than shrinking quality quietly.",
+        "Know which few items customers compare on price and which they do not — you have more room on the second group."
+      ],
+      "watch_out": "Matching a competitor's price without knowing your own cost is how a busy shop loses money."
+    },
+    "stock_management": {
+      "title": "Managing stock",
+      "practices": [
+        "Count your fastest-moving items often and the slow ones rarely.",
+        "Set a level for each important item at which you reorder, and act on it before it runs out.",
+        "Buy in larger quantity only for items that sell reliably and do not spoil.",
+        "Clear slow stock deliberately — money sitting on a shelf cannot buy what sells."
+      ],
+      "watch_out": "Restocking on a feeling rather than on what actually sold is the most common way cash gets trapped."
+    },
+    "customer_retention": {
+      "title": "Keeping customers coming back",
+      "practices": [
+        "Consistency beats promotions — same quality, same hours, same fair price.",
+        "Fix a complaint quickly and visibly; the customer who was put right tells more people than the one who was never wronged.",
+        "Keep a note of your regulars and what they buy, and tell them first when it arrives.",
+        "Handle credit fairly but firmly so that generosity does not turn into resentment on either side."
+      ],
+      "watch_out": "Discounting for loyal customers trains them to wait for discounts — recognition works better than price cuts."
+    },
+    "debt_collection": {
+      "title": "Getting paid what you are owed",
+      "practices": [
+        "Agree the payment date out loud at the moment you give credit, and record it.",
+        "Follow up politely on the day it is due, not weeks later — early reminders keep the relationship intact.",
+        "Chase the largest and oldest balances first; they carry the most risk.",
+        "Set a limit per customer and stop adding to a balance that is already past its date."
+      ],
+      "watch_out": "Credit given without a recorded date is the hardest money in a business to collect."
+    },
+    "cash_flow": {
+      "title": "Keeping cash moving",
+      "practices": [
+        "Know what you must pay this month before you commit money to new stock.",
+        "Keep the money for restocking separate from money for household needs.",
+        "Turn slow stock and old debts into cash before borrowing.",
+        "Bank or set aside a fixed share of takings on the same day, so it is not spent by accident."
+      ],
+      "watch_out": "A profitable business can still fail if the cash arrives later than the bills — watch timing, not only totals."
+    },
+    "new_products": {
+      "title": "Deciding what to add",
+      "practices": [
+        "Start with what customers already ask you for and you have to turn away.",
+        "Add items close to what you already sell so the same customers buy them.",
+        "Try a small quantity first and let the sales decide before you commit money.",
+        "Prefer items that do not spoil quickly while you learn whether they move."
+      ],
+      "watch_out": "A new line that does not sell ties up cash and shelf space that your proven items needed."
+    },
+    "record_keeping": {
+      "title": "Keeping records that help you decide",
+      "practices": [
+        "Record the sale at the moment it happens — memory at closing time is not a record.",
+        "Record who a credit sale belongs to, not just the amount.",
+        "Record what you actually paid for stock, so profit is real and not a guess.",
+        "Look at your own figures once a week; a record you never read is only work."
+      ],
+      "watch_out": "Records with gaps produce confident-looking numbers that are wrong — an honest gap is safer than a filled-in guess."
+    },
+    "growth": {
+      "title": "Planning to grow",
+      "practices": [
+        "Grow the part of the business that is already working before starting something new.",
+        "Write down what the next step would cost and what it must earn to be worth it.",
+        "Prove demand at a small scale before you commit to rent, staff or a bulk purchase.",
+        "Keep enough cash to survive a slow month — growth that leaves you fragile is not progress."
+      ],
+      "watch_out": "Expanding while the current business still leaks money multiplies the leak."
+    }
+  }
+}

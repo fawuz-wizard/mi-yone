@@ -14,13 +14,13 @@ export function usePartnerHistory() {
 export function useAskPartner() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (text: string) =>
-      api<PartnerAskResponse>(`/businesses/${BUSINESS_ID}/partner/messages`, { method: "POST", body: { text } }),
+    mutationFn: ({ text, mode }: { text: string; mode: "auto" | "business" | "research" }) =>
+      api<PartnerAskResponse>(`/businesses/${BUSINESS_ID}/partner/messages`, { method: "POST", body: { text, mode } }),
     onSuccess: (data) => {
       qc.setQueryData<PartnerHistoryResponse>(["partner"], (prev) =>
         prev
           ? { ...prev, messages: [...prev.messages, data.owner, data.partner] }
-          : { messages: [data.owner, data.partner], provider: "local" },
+          : { messages: [data.owner, data.partner], provider: "local", research_available: false },
       );
     },
   });

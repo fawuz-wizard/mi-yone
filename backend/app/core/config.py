@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     ai_api_key: str = ""
     ai_model: str = "claude-sonnet-4-5"
 
+    # Market research (Phase 2 research boundary). Separate switch from the
+    # Partner composer: an owner may want grounded phrasing without paying for
+    # web search, or web search without changing the composer.
+    research_provider: str = "none"  # "none" (honestly unavailable) | "anthropic"
+    research_model: str = "claude-sonnet-4-5"
+
     # File storage (product photos) — local disk now, object storage later
     upload_dir: str = "./var/uploads"
 

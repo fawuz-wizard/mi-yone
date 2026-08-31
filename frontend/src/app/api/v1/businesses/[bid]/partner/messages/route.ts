@@ -15,8 +15,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ bid
   const unauthorized = requireSession(req);
   if (unauthorized) return unauthorized;
   await params;
-  const body = (await req.json().catch(() => null)) as { text?: string } | null;
+  const body = (await req.json().catch(() => null)) as { text?: string; mode?: string } | null;
   const text = (body?.text ?? "").trim();
   if (!text || text.length > 500) return fail(422, err("VALIDATION_ERROR", "Ask me something about your business."));
-  return ok(partnerAsk(text), { status: 201 });
+  const mode = body?.mode ?? "auto";
+  if (!["auto", "business", "research"].includes(mode)) return fail(422, err("VALIDATION_ERROR", "Unknown mode."));
+  return ok(partnerAsk(text, mode as "auto" | "business" | "research"), { status: 201 });
 }

@@ -52,6 +52,8 @@ _ADDITIVE_COLUMNS = (
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
     "ALTER TABLE catalog_import_items ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
     "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS alert_prefs VARCHAR(200)",
+    "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'business'",
+    "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS blocks_json TEXT",
     "UPDATE debts SET created_at = since WHERE created_at IS NULL",
     "UPDATE sales SET created_at = occurred_at WHERE created_at IS NULL",
     "UPDATE inventory_movements SET created_at = occurred_at WHERE created_at IS NULL",

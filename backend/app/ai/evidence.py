@@ -16,6 +16,7 @@ Fact classes, marked in the sentences themselves:
   - interpretation ("My read: …" — clearly separated)
   - insufficient information ("I don't have enough … yet.")
 """
+from dataclasses import dataclass, field
 from datetime import timedelta
 
 from sqlalchemy import select
@@ -27,12 +28,56 @@ from ..serializers import stock_of
 from ..services import analytics
 from ..services.finance import visible_query
 from ..services.watch import compute_watch
+from ..advice import playbook
+from ..research import provider as research_provider
 from .lang import normalize
 
 INTENTS = (
     "overview", "profit_why", "expenses", "top_products", "product",
     "stock_why", "debts", "attention", "compare", "help",
+    # Advisor extension (owner brief): guidance and market research are
+    # separate lanes with their own provenance — never blended into records.
+    "advice", "decision", "research",
 )
+
+# The three kinds of knowledge an answer can contain. Every block carries one,
+# and the label travels all the way to the screen.
+SOURCE_RECORDS = "records"    # the owner's own verified data
+SOURCE_GUIDANCE = "guidance"  # curated human-written business practice
+SOURCE_WEB = "web"            # live market research, with sources
+SOURCE_NOTE = "note"          # the Partner talking about itself (what it can
+                              # and cannot do) — not a knowledge claim, so it
+                              # carries no provenance label on screen
+
+
+@dataclass
+class Block:
+    """One provenance-labelled part of an answer."""
+
+    source: str
+    text: str
+    sources: list[dict] = field(default_factory=list)
+    researched_at: str | None = None
+
+    def as_json(self) -> dict:
+        d = {"source": self.source, "text": self.text}
+        if self.sources:
+            d["sources"] = self.sources
+        if self.researched_at:
+            d["researched_at"] = self.researched_at
+        return d
+
+
+@dataclass
+class Answer:
+    mode: str  # "business" | "advice" | "research"
+    intent: str
+    product: Product | None
+    blocks: list[Block]
+
+    @property
+    def records_facts(self) -> list[str]:
+        return [b.text for b in self.blocks if b.source == SOURCE_RECORDS]
 
 _money = lambda m: format_money(m)["display"]  # noqa: E731
 
@@ -45,15 +90,9 @@ def _product_tokens(p: Product) -> set[str]:
     return {t for t in _tokens(p.name) if len(t) >= 3 and not t[0].isdigit()}
 
 
-def route(question: str, products: list[Product]) -> tuple[str, Product | None]:
-    """Deterministic intent router. Product mentions win over generic intents so
-    'how much did I make from rice' lands on the product, not the overview.
-    Krio is first-class: the question is normalized (ai/lang.py vocabulary)
-    before routing, so English, Krio, and mixed phrasing route identically."""
-    q = normalize(question)
-    words = set(_tokens(q))
-
-    # Best-score match: "palm oil" must beat "cooking oil" on the shared token.
+def _match_product(words: set[str], products: list[Product]) -> Product | None:
+    """Best-score product match: 'palm oil' must beat 'cooking oil' on the
+    shared token. One rule, used by every lane."""
     matched: Product | None = None
     best = 0
     for p in products:
@@ -61,6 +100,17 @@ def route(question: str, products: list[Product]) -> tuple[str, Product | None]:
         if score > best:
             best = score
             matched = p
+    return matched
+
+
+def route(question: str, products: list[Product]) -> tuple[str, Product | None]:
+    """Deterministic intent router. Product mentions win over generic intents so
+    'how much did I make from rice' lands on the product, not the overview.
+    Krio is first-class: the question is normalized (ai/lang.py vocabulary)
+    before routing, so English, Krio, and mixed phrasing route identically."""
+    q = normalize(question)
+    words = set(_tokens(q))
+    matched = _match_product(words, products)
 
     if any(w in words for w in ("attention", "focus", "worry", "watch", "problem", "problems")):
         return "attention", None
@@ -76,7 +126,7 @@ def route(question: str, products: list[Product]) -> tuple[str, Product | None]:
         return "expenses", None
     if any(w in words for w in ("stock", "inventory")) :
         return "stock_why", None
-    if any(w in words for w in ("selling", "sellers", "bestseller", "best", "top")) and ("product" in q or "products" in q or "selling" in words):
+    if any(w in words for w in ("selling", "sellers", "bestseller", "best", "top", "move", "moving", "moves")) and ("product" in q or "products" in q or "selling" in words or "move" in words or "moving" in words):
         return "top_products", None
     if any(w in words for w in ("owe", "owes", "owed", "debt", "debts", "credit")):
         return "debts", None
@@ -292,7 +342,9 @@ def _compare(db: Session, business: Business) -> list[str]:
 HELP_TEXT = (
     "I can explain what's in your business records. Try asking: \"How is my business doing this month?\", "
     "\"Why did my profit decrease?\", \"What are my biggest expenses?\", \"Which products are selling the most?\", "
-    "\"Who owes me money?\", or \"What should I pay attention to?\" I only use your recorded data — I never make figures up."
+    "\"Who owes me money?\", or \"What should I pay attention to?\" I can also give you general business "
+    "guidance — \"how can I increase sales?\", \"how do I use WhatsApp to sell?\" — and research the market "
+    "when you ask me to. I always tell you which of the three an answer came from, and I never make figures up."
 )
 
 
@@ -327,13 +379,223 @@ def resolve_context(
     return intent, product
 
 
+
+# ---------------------------------------------------------------------------
+# Advisor lanes (owner brief) — guidance and research routing
+# ---------------------------------------------------------------------------
+
+# Explicit "go and look this up" shapes. Checked FIRST, so "research rice
+# market" is a research request and not a question about the rice product.
+RESEARCH_TRIGGERS = (
+    "research", "look up", "search for", "market price", "market prices",
+    "going rate", "people buying", "people buy", "customers buying",
+    "what is the price of", "current price", "market trend", "market trends",
+    "competitor", "competitors", "industry", "trending", "in demand",
+    "businesses doing", "shops doing", "businesses are doing", "other shops",
+)
+
+# "Should I …" only counts as a decision when a business action follows it.
+# "What should I focus on?" stays an attention question, as it always was.
+DECISION_VERBS = (
+    "buy", "restock", "stock", "increase", "raise", "reduce", "lower", "drop",
+    "add", "sell", "expand", "open", "borrow", "hire", "invest", "order",
+)
+
+# Topic → the records lane that gives that advice its factual footing.
+_SITUATION_OF = {
+    "reduce_expenses": "expenses",
+    "cash_flow": "expenses",
+    "debt_collection": "debts",
+    "stock_management": "stock_why",
+    "new_products": "top_products",
+    "pricing": "top_products",
+}
+
+
+def _has_any(text: str, needles) -> bool:
+    return any(n in text for n in needles)
+
+
+def route_mode(question: str, words: set[str]) -> str | None:
+    """Which knowledge lane is being asked for? Returns 'research', 'decision',
+    'advice' or None (= the existing business-records routing)."""
+    if _has_any(question, RESEARCH_TRIGGERS):
+        return "research"
+    if "should" in words and (words & set(DECISION_VERBS)) and not (words & {"focus", "attention", "worry"}):
+        return "decision"
+    if _has_any(question, playbook.ADVICE_TRIGGERS):
+        return "advice"
+    return None
+
+
+def _guidance_block(topic: str) -> Block:
+    return Block(source=SOURCE_GUIDANCE, text=playbook.render(topic))
+
+
+def _situation_blocks(db: Session, business: Business, question: str, topic: str, product: Product | None) -> list[Block]:
+    """The owner's own numbers behind an advice answer — so guidance lands on
+    top of their real situation instead of floating free."""
+    if product is not None:
+        return [Block(source=SOURCE_RECORDS, text=f) for f in _product(db, business, product)]
+    if "compare" in question or "last month" in question:
+        facts = _compare(db, business)
+    else:
+        builder = _SITUATION_OF.get(topic)
+        facts = {
+            "expenses": lambda: _expenses(db, business),
+            "debts": lambda: _debts(db, business),
+            "stock_why": lambda: _stock_why(db, business),
+            "top_products": lambda: _top_products(db, business),
+        }.get(builder, lambda: _overview(db, business, question))()
+    return [Block(source=SOURCE_RECORDS, text=f) for f in facts]
+
+
+def _advice_answer(db: Session, business: Business, question: str, normalized: str, product: Product | None) -> Answer:
+    topic = playbook.match_topic(normalized)
+    blocks = _situation_blocks(db, business, normalized, topic, product)
+    blocks.append(_guidance_block(topic))
+    blocks.append(Block(
+        source=SOURCE_NOTE,
+        text="If you want current market information on this, ask me to research it — I'll show you where it came from.",
+    ))
+    return Answer(mode="advice", intent="advice", product=product, blocks=blocks)
+
+
+def _decision_answer(db: Session, business: Business, question: str, normalized: str, product: Product | None) -> Answer:
+    """Decision support: the records first, then guidance, then a balanced
+    consideration. The Partner never issues an order — the owner decides."""
+    topic = playbook.match_topic(normalized, fallback="stock_management")
+    blocks = _situation_blocks(db, business, normalized, topic, product)
+
+    # A considered, records-derived weighing — both sides, no instruction.
+    if product is not None and product.track_inventory:
+        stock = stock_of(db, product.id)
+        low = stock <= product.low_stock_threshold
+        now = utcnow()
+        moves = list(db.scalars(select(StockMovement).where(
+            StockMovement.business_id == business.id, StockMovement.product_id == product.id)))
+        sold = sum(abs(m.quantity_delta) for m in moves if m.type == "SALE" and m.occurred_at >= now - timedelta(days=30))
+        prev = sum(abs(m.quantity_delta) for m in moves if m.type == "SALE" and now - timedelta(days=60) <= m.occurred_at < now - timedelta(days=30))
+        if low and sold > 0:
+            weigh = (f"Weighing it up: {product.name} is at or below your low-stock level and it has been "
+                     f"selling, so running out is a real risk. Against that, restocking ties up cash — check "
+                     f"what you owe suppliers this week before you commit.")
+        elif not low and prev > sold:
+            weigh = (f"Weighing it up: you still have {stock} {product.unit} and it sold slower than the month "
+                     f"before, so there's no urgency in your records. Money spent here is money not available "
+                     f"for what is moving.")
+        else:
+            weigh = ("Weighing it up: your records don't show an urgent shortage. The question is whether the "
+                     "cash is better used here or on what is selling faster right now — that part is your call.")
+        blocks.append(Block(source=SOURCE_RECORDS, text=weigh))
+    else:
+        blocks.append(Block(
+            source=SOURCE_RECORDS,
+            text=("I can only weigh this against what your records actually show. If the figures above don't "
+                  "cover the decision, tell me what else you're comparing and I'll look at that too."),
+        ))
+    blocks.append(_guidance_block(topic))
+    return Answer(mode="advice", intent="decision", product=product, blocks=blocks)
+
+
+def _research_query(question: str, normalized: str, subject: Product | None) -> str:
+    """"Research am." only means something if we know what "am" was. A short
+    pronoun request inherits the subject of the previous answer — the same
+    deterministic conversation context the records lane already uses."""
+    words = set(_tokens(normalized))
+    bare = words - {"research", "look", "up", "search", "for", "it", "that", "this", "please", "am"}
+    if subject is not None and len(bare) <= 1:
+        return f"current market information and typical prices for {subject.name} in Sierra Leone"
+    return question
+
+
+def _research_answer(db: Session, business: Business, question: str, normalized: str, subject: Product | None = None) -> Answer:
+    """Market research: an external lane with its own provider, its own label,
+    and sources. Only the QUESTION and a minimal, non-identifying market hint
+    leave MI YONE — never figures, customer names, or the product list."""
+    prov = research_provider.get_provider()
+    result = prov.search(
+        _research_query(question, normalized, subject),
+        context="The owner runs a small shop in Sierra Leone.",
+    )
+    blocks: list[Block] = []
+
+    # A research question that also references the owner's business gets its
+    # own records block — dual provenance, never blended (design spec §22).
+    if _has_any(normalized, ("my business", "my shop", "compare", "my sales")):
+        blocks += [Block(source=SOURCE_RECORDS, text=f) for f in _overview(db, business, normalized)]
+
+    # When research can't run, don't just refuse: if the question has an honest
+    # answer inside the owner's OWN records, offer that instead — clearly
+    # labelled as their shop, not the market.
+    if not result.ok and not blocks and _has_any(normalized, ("buy", "buying", "sell", "selling", "product", "products", "move", "moving")):
+        blocks.append(Block(
+            source=SOURCE_RECORDS,
+            text="I can't tell you what the wider market is buying, but I can tell you what is moving in your own shop:",
+        ))
+        blocks += [Block(source=SOURCE_RECORDS, text=f) for f in _top_products(db, business)]
+
+    blocks.append(Block(
+        source=SOURCE_WEB if result.ok else SOURCE_NOTE,
+        text=result.summary,
+        sources=[s.as_json() for s in result.sources],
+        researched_at=result.researched_at or None,
+    ))
+    return Answer(mode="research", intent="research", product=None, blocks=blocks)
+
+
+def build_answer(
+    db: Session, business: Business, question: str,
+    prev_intent: str | None = None, prev_product_id: str | None = None,
+) -> Answer:
+    """Route a question to the right knowledge lane and build a provenance-
+    labelled answer.
+
+    Three lanes, never blended:
+      records   — the owner's verified data (deterministic services)
+      guidance  — curated human-written business practice (advice/playbook.json)
+      web       — live market research with sources (research/provider.py)
+
+    A single answer may contain blocks from more than one lane — that is the
+    combined intelligence the brief asks for — but each block keeps its own
+    label all the way to the screen, so the owner always knows which is which.
+    """
+    products = list(db.scalars(select(Product).where(Product.business_id == business.id, Product.archived.is_(False))))
+    normalized = normalize(question)
+    words = set(_tokens(normalized))
+    lane = route_mode(normalized, words)
+
+    if lane == "research":
+        subject = _match_product(words, products) or (
+            next((p for p in products if p.id == prev_product_id), None) if prev_product_id else None
+        )
+        return _research_answer(db, business, question, normalized, subject)
+    if lane in ("advice", "decision"):
+        matched = _match_product(words, products)
+        if matched is None and prev_product_id:
+            # A follow-up like "so should I buy more?" keeps the subject.
+            matched = next((p for p in products if p.id == prev_product_id), None)
+        if lane == "decision":
+            return _decision_answer(db, business, question, normalized, matched)
+        return _advice_answer(db, business, question, normalized, matched)
+
+    intent, product, facts = build_reply_facts(
+        db, business, question, prev_intent=prev_intent, prev_product_id=prev_product_id, _products=products
+    )
+    return Answer(mode="business", intent=intent, product=product,
+                  blocks=[Block(source=SOURCE_RECORDS, text=f) for f in facts])
+
+
 def build_reply_facts(
     db: Session, business: Business, question: str,
     prev_intent: str | None = None, prev_product_id: str | None = None,
+    _products: list[Product] | None = None,
 ) -> tuple[str, Product | None, list[str]]:
     """Route the question (with conversation context) and return
-    (intent, matched product, grounded fact sentences)."""
-    products = list(db.scalars(select(Product).where(Product.business_id == business.id, Product.archived.is_(False))))
+    (intent, matched product, grounded fact sentences) from the RECORDS lane."""
+    products = _products if _products is not None else list(
+        db.scalars(select(Product).where(Product.business_id == business.id, Product.archived.is_(False)))
+    )
     intent, product = route(question, products)
     prev_product = next((p for p in products if p.id == prev_product_id), None) if prev_product_id else None
     intent, product = resolve_context(question, intent, product, prev_intent, prev_product)

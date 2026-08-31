@@ -19,32 +19,7 @@ import { isDomainError } from "@/shared/api/client";
 import type { Category, Customer, Product, Supplier, Transaction } from "@/shared/api/types";
 import { interpretEntry, parseBareQuantity, type EntryIntent, type InterpretedEntry, type InterpretIssue } from "./interpret";
 import { useRecordDebt, useRecordPurchase } from "./api";
-
-// --- Minimal Web Speech typings (lib.dom has none for the webkit prefix) -----
-interface SpeechAlternativeLike { transcript: string }
-interface SpeechResultLike { 0: SpeechAlternativeLike; isFinal: boolean }
-interface SpeechEventLike { results: ArrayLike<SpeechResultLike>; resultIndex: number }
-interface SpeechErrorLike { error?: string }
-interface SpeechRecognitionLike {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  onresult: ((e: SpeechEventLike) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((e: SpeechErrorLike) => void) | null;
-  start: () => void;
-  stop: () => void;
-}
-type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
-
-function speechCtor(): SpeechRecognitionCtor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SpeechRecognitionCtor;
-    webkitSpeechRecognition?: SpeechRecognitionCtor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
+import { speechCtor, type SpeechRecognitionLike } from "@/shared/speech";
 
 const group = (n: string | number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 

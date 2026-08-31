@@ -101,17 +101,40 @@ export interface Envelope<T> {
 }
 
 // Partner AI — conversation over verified records (never the source of truth).
+// Where one part of a Partner answer came from. The label travels from the
+// evidence layer to the screen: records and external knowledge are never
+// presented as the same kind of thing.
+// "note" = the Partner describing its own limits; it is not a knowledge
+// claim, so it is shown without a provenance label.
+export type PartnerSource = "records" | "guidance" | "web" | "note";
+
+export interface PartnerSourceLink {
+  title: string;
+  url: string;
+  published: string | null;
+}
+
+export interface PartnerBlock {
+  source: PartnerSource;
+  text: string;
+  sources?: PartnerSourceLink[];
+  researched_at?: string;
+}
+
 export interface PartnerMessage {
   id: string;
   role: "owner" | "partner";
   text: string;
   intent: string | null;
+  mode?: "business" | "advice" | "research";
+  blocks?: PartnerBlock[];
   created_at: string;
 }
 
 export interface PartnerHistoryResponse {
   messages: PartnerMessage[];
   provider: string; // "local" (built-in composer) | external provider name
+  research_available?: boolean; // false = no market-research provider configured
 }
 
 export interface PartnerAskResponse {
