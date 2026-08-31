@@ -199,6 +199,7 @@ export interface Product {
   description: string | null;
   sku: string | null;
   category: string | null;
+  origin?: "manual" | "photo" | "whatsapp"; // provenance: how the product entered
   has_image: boolean;
   image_url: string | null; // tenant-guarded API path, renderable in <img>
   // Price history: distinct unit prices from recent recorded sales (newest
@@ -229,6 +230,7 @@ export interface CreateProductInput {
   description?: string;
   sku?: string;
   category?: string;
+  origin?: "manual" | "photo"; // client's own flow only — whatsapp is server-stamped
 }
 
 export interface UpdateProductInput {

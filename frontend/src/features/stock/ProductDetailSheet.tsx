@@ -133,6 +133,11 @@ export function ProductDetailSheet({ productId, onClose }: { productId: string |
               <Fact label={t("stock.sellingPrice")} value={product.selling_price.display} />
               <Fact label={t("stock.costPrice")} value={product.cost_price.display} />
             </div>
+            {product.origin === "whatsapp" || product.origin === "photo" ? (
+              <p className="text-sm text-text-secondary" data-testid="product-origin">
+                {t(product.origin === "whatsapp" ? "stock.originWhatsapp" : "stock.originPhoto")}
+              </p>
+            ) : null}
             <div>
               <p className="text-[13px] font-semibold uppercase tracking-wide text-text-secondary">
                 {t("stock.history")}

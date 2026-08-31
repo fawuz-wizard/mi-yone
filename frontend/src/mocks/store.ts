@@ -420,6 +420,7 @@ import type {
 
 interface ProductRow {
   id: string;
+  origin?: "manual" | "photo" | "whatsapp";
   name: string;
   unit: string;
   selling_minor: number;
@@ -505,6 +506,7 @@ export function toProduct(row: ProductRow): Product {
     description: row.description ?? null,
     sku: row.sku ?? null,
     category: row.category ?? null,
+    origin: row.origin ?? "manual",
     has_image: productImages.has(row.id),
     image_url: productImages.has(row.id) ? `/api/v1/businesses/b-demo-1/products/${row.id}/image` : null,
     recent_prices: recentSalePrices(row.id),
@@ -552,9 +554,11 @@ export function createProduct(input: {
   description?: string;
   sku?: string;
   category?: string;
+  origin?: "manual" | "photo" | "whatsapp";
 }): Product {
   const row: ProductRow = {
     id: id("p"),
+    origin: input.origin ?? "manual",
     name: input.name.trim(),
     unit: input.unit?.trim() || "piece",
     selling_minor: input.selling_price_minor,

@@ -122,6 +122,12 @@ class Product(Base):
     sku: Mapped[str | None] = mapped_column(String(80), nullable=True)
     category: Mapped[str | None] = mapped_column(String(80), nullable=True)
     image_key: Mapped[str | None] = mapped_column(String(200), nullable=True)  # storage key, never a raw path
+    # Provenance (owner brief): how this product entered MI YONE.
+    origin: Mapped[str] = mapped_column(String(12), default="manual")  # manual/photo/whatsapp
+    # External catalog identity (WhatsApp/Meta product id) — the strong key for
+    # re-import duplicate detection. Never shown to the owner as-is.
+    external_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class StockMovement(Base):
@@ -251,6 +257,7 @@ class CatalogImportItem(Base):
     category: Mapped[str | None] = mapped_column(String(80), nullable=True)
     sku: Mapped[str | None] = mapped_column(String(80), nullable=True)
     availability: Mapped[str | None] = mapped_column(String(20), nullable=True)  # "in stock" etc.
+    external_id: Mapped[str | None] = mapped_column(String(80), nullable=True)  # Meta product id
     status: Mapped[str] = mapped_column(String(20), default="NEEDS_REVIEW")  # NEEDS_REVIEW | APPROVED | SKIPPED
     duplicate_of_product_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     product_id: Mapped[str | None] = mapped_column(String(40), nullable=True)  # set on approve

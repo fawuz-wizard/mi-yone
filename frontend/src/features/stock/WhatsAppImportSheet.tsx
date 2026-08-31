@@ -96,7 +96,11 @@ export function WhatsAppImportSheet({ open, onClose }: { open: boolean; onClose:
             {imp && imp.status === "IMPORTED" ? (
               <div className="space-y-2">
                 <p className="text-sm text-text-secondary">
-                  {imp.needs_review > 0 ? `${t("wa.reviewIntro")} · ${t("wa.needsReview", { count: String(imp.needs_review) })}` : t("wa.allDone", {
+                  {imp.needs_review > 0 ? `${t("wa.summaryLine", {
+                    found: String(imp.items.length),
+                    fresh: String(imp.items.filter((i) => !i.duplicate_of_product_id).length),
+                    matched: String(imp.items.filter((i) => i.duplicate_of_product_id).length),
+                  })} · ${t("wa.needsReview", { count: String(imp.needs_review) })}` : t("wa.allDone", {
                     added: String(imp.items.filter((i) => i.status === "APPROVED").length),
                     skipped: String(imp.items.filter((i) => i.status === "SKIPPED").length),
                   })}

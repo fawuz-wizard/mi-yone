@@ -82,6 +82,10 @@ test("WhatsApp: connect → import → review with duplicate warning, incomplete
   const items = page.getByTestId("wa-item");
   await expect(items).toHaveCount(5);
 
+  // Import summary: found / new / possibly-existing counts, before anything is created.
+  await expect(page.getByText(/5 found/)).toBeVisible();
+  await expect(page.getByText(/may already exist/)).toBeVisible();
+
   // Duplicate detection: catalog "Rice 50kg" vs existing "Rice (50kg bag)".
   const rice = items.filter({ hasText: "Rice 50kg" });
   await expect(rice.getByTestId("wa-dup-warn")).toContainText("May already exist as Rice (50kg bag)");
@@ -106,6 +110,10 @@ test("WhatsApp: connect → import → review with duplicate warning, incomplete
   await expect(page.getByTestId("product-row").filter({ hasText: "Palm oil (1L)" })).toContainText("10 left");
   await expect(page.getByTestId("product-row").filter({ hasText: "Maggi cubes (pack)" })).toBeVisible();
   await expect(page.getByTestId("product-row").filter({ hasText: "Rice 50kg" })).toHaveCount(0); // skipped
+
+  // Auditability: the imported product declares its WhatsApp provenance.
+  await page.getByTestId("product-row").filter({ hasText: "Palm oil (1L)" }).click();
+  await expect(page.getByTestId("product-origin")).toContainText("WhatsApp");
 });
 
 test("the loop: sell an imported product, then the Partner explains it from real records", async ({ page }) => {

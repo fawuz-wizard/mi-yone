@@ -153,6 +153,7 @@ export function ProductFormSheet({
           cost_price_minor: toMinor(cost) || undefined,
           low_stock_threshold: Math.max(0, parseInt(threshold || "5", 10) || 5),
           initial_stock: Math.max(0, parseInt(initialStock || "0", 10) || 0) || undefined,
+          origin: photo ? "photo" : "manual",
           ...extras,
         });
         productId = created.id;

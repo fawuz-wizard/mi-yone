@@ -79,6 +79,7 @@ def product_json(db: Session, p: Product) -> dict:
         "description": p.description,
         "sku": p.sku,
         "category": p.category,
+        "origin": p.origin,
         "has_image": p.image_key is not None,
         "image_url": f"/api/v1/businesses/{p.business_id}/products/{p.id}/image" if p.image_key else None,
         # Price suggestion support: what this product ACTUALLY sold for lately.

@@ -47,6 +47,10 @@ _ADDITIVE_COLUMNS = (
     "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
     # Older rows predate the recorded-at column: the honest backfill is the
     # event time itself (we know nothing later than that).
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS origin VARCHAR(12) NOT NULL DEFAULT 'manual'",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
+    "ALTER TABLE catalog_import_items ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
     "UPDATE debts SET created_at = since WHERE created_at IS NULL",
     "UPDATE sales SET created_at = occurred_at WHERE created_at IS NULL",
     "UPDATE inventory_movements SET created_at = occurred_at WHERE created_at IS NULL",

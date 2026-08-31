@@ -30,6 +30,7 @@ from ..core.envelope import ApiError
 @dataclass
 class CatalogItem:
     name: str
+    external_id: str | None = None  # Meta product id — the strong re-import key
     description: str | None = None
     price_minor: int | None = None  # None = the catalog did not state a price
     image_url: str | None = None
@@ -50,27 +51,31 @@ class TestWhatsAppCatalog:
             CatalogItem(
                 name="Rice 50kg", description="Imported long-grain rice, 50kg bag",
                 price_minor=90_000_00, category="Food", sku="WA-RICE-50",
-                availability="in stock",
+                availability="in stock", external_id="meta-1001",
+                image_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOY5aoAAAJ8AQA2eOIYAAAAAElFTkSuQmCC",
             ),
             CatalogItem(
                 name="Palm oil (1L)", description="Locally produced red palm oil",
                 price_minor=25_000_00, category="Cooking", sku="WA-PALM-1L",
-                availability="in stock", image_url="https://example.invalid/palm-oil.jpg",
+                availability="in stock", external_id="meta-1002",
+                # Deliberately unreachable: exercises the image-failure path —
+                # the product must still import cleanly, just without a photo.
+                image_url="https://example.invalid/palm-oil.jpg",
             ),
             CatalogItem(
                 name="Maggi cubes (pack)", description="Seasoning cubes, pack of 60",
                 price_minor=None, category="Cooking", sku="WA-MAGGI-60",  # no price → needs completing
-                availability="in stock",
+                availability="in stock", external_id="meta-1003",
             ),
             CatalogItem(
                 name="Peak milk (tin)", price_minor=12_000_00, category="Food",
-                sku="WA-PEAK-TIN", availability="in stock",
-                image_url="https://example.invalid/peak.jpg",
+                sku="WA-PEAK-TIN", availability="in stock", external_id="meta-1004",
+                image_url="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOQrvIGAAGUAOFEZhcvAAAAAElFTkSuQmCC",
             ),
             CatalogItem(
                 name="Lux soap", description="Bath soap bar",
                 price_minor=2_000_00, category="Household", sku="WA-LUX",
-                availability="in stock",
+                availability="in stock", external_id="meta-1005",
             ),
         ]
 
@@ -104,7 +109,7 @@ class MetaWhatsAppCatalog:
         catalog_id = data[0]["id"]
         products = httpx.get(
             f"{self.GRAPH}/{catalog_id}/products",
-            params={"fields": "name,description,price,currency,image_url,category,retailer_id,availability"},
+            params={"fields": "id,name,description,price,currency,image_url,category,retailer_id,availability"},
             headers=headers, timeout=30.0,
         )
         products.raise_for_status()
@@ -121,6 +126,7 @@ class MetaWhatsAppCatalog:
                     price_minor = None
             items.append(
                 CatalogItem(
+                    external_id=p.get("id"),
                     name=p.get("name") or "Unnamed product",
                     description=p.get("description"),
                     price_minor=price_minor,

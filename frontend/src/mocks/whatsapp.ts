@@ -113,6 +113,7 @@ export function waApprove(
     selling_price_minor: price,
     cost_price_minor: payload.cost_price_minor ?? 0,
     initial_stock: payload.initial_stock ?? 0,
+    origin: "whatsapp",
   });
   item.status = "APPROVED";
   item.product_id = product.id;

@@ -28,6 +28,9 @@ class CreateProductInput(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     sku: str | None = Field(default=None, max_length=80)
     category: str | None = Field(default=None, max_length=80)
+    # Client hint about ITS OWN flow only — "whatsapp" is stamped server-side
+    # by the catalog import and can never be claimed here.
+    origin: str = Field(default="manual", pattern="^(manual|photo)$")
 
 
 class UpdateProductInput(BaseModel):
@@ -78,6 +81,7 @@ def create_product(body: CreateProductInput, ctx: TenantContext = Depends(tenant
         description=(body.description or "").strip() or None,
         sku=(body.sku or "").strip() or None,
         category=(body.category or "").strip() or None,
+        origin=body.origin,
     )
     db.add(p)
     if body.initial_stock and body.initial_stock > 0:

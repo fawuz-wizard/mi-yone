@@ -430,5 +430,8 @@
   "method.scan": "Scan",
   "capture.recentPrices": "Sold before at {list}",
   "scan.comingSoon": "Coming very soon",
-  "scan.lockedBody": "Scan-to-sell is coming very soon. Until then, record sales with Money in — it's just as fast."
+  "scan.lockedBody": "Scan-to-sell is coming very soon. Until then, record sales with Money in — it's just as fast.",
+  "wa.summaryLine": "{found} found · {fresh} new · {matched} may already exist",
+  "stock.originWhatsapp": "Added from your WhatsApp catalog",
+  "stock.originPhoto": "Created from a photo"
 }

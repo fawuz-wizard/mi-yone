@@ -126,7 +126,17 @@ use — suggest, never silently assume; old records are never rewritten.
 Scan-to-sell is behind a feature switch (shared/flags.ts): LOCKED by default
 ("Coming very soon" in the chooser; scan/labels/QR entries hidden) — enable
 with NEXT_PUBLIC_MIYONE_SCAN=on (E2E requires a flag-on build).
-66 unit + 78 Playwright E2E green (vs mock AND real backend); 86 backend tests.
+WhatsApp import completed to testing stage (owner brief): CatalogItem/
+ImportItem/Product carry the Meta external_id (strong duplicate key — a
+re-import matches by id and approving UPDATES the product in place, no
+duplicate row; weak name matches still warn + owner decides); approve maps
+description/sku/category and persists the catalog image through core/storage
+(data: URIs for the TEST adapter, httpx download for Meta; failure = product
+imports without a photo, never blocks); Product gains origin provenance
+(manual/photo/whatsapp — whatsapp is server-stamped only, clients may claim
+manual|photo) + created_at; review sheet shows found/new/matched counts;
+product detail shows the origin line.
+66 unit + 78 Playwright E2E green (vs mock AND real backend); 91 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable
