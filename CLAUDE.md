@@ -123,6 +123,9 @@ invent one); products expose `recent_prices` (distinct unit prices from
 recent sale movements, newest first) and the capture sheet shows a
 "Sold before at …" hint whenever recorded prices conflict with the price in
 use — suggest, never silently assume; old records are never rewritten.
+Scan-to-sell is behind a feature switch (shared/flags.ts): LOCKED by default
+("Coming very soon" in the chooser; scan/labels/QR entries hidden) — enable
+with NEXT_PUBLIC_MIYONE_SCAN=on (E2E requires a flag-on build).
 66 unit + 78 Playwright E2E green (vs mock AND real backend); 86 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions

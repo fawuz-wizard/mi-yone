@@ -13,6 +13,7 @@ import { useToast } from "@/shared/design-system/Toast";
 import { EMPTY_AMOUNT, fromMinor, isEmpty, toMinor, type AmountState } from "@/shared/design-system/amount";
 import { isDomainError } from "@/shared/api/client";
 import { captureQueue } from "@/shared/capture-queue";
+import { SCAN_ENABLED } from "@/shared/flags";
 import { useT } from "@/shared/i18n";
 import {
   useCategories,
@@ -541,7 +542,7 @@ export function CaptureChooser({
   return (
     <BottomSheet open={open} title={t("nav.add")} onClose={onClose}>
       <div className="grid gap-2 pb-4">
-        {onScan ? (
+        {onScan && SCAN_ENABLED ? (
           <button
             data-testid="choose-scan"
             onClick={onScan}
@@ -553,6 +554,19 @@ export function CaptureChooser({
               <span className="block text-sm text-text-secondary">{t("scan.chooserLabel")}</span>
             </span>
           </button>
+        ) : onScan ? (
+          /* Locked (owner decision): visible tease, honestly disabled. */
+          <div
+            data-testid="choose-scan-locked"
+            aria-disabled
+            className="flex min-h-[64px] items-center gap-3 rounded-card border border-border bg-surface px-4 text-left opacity-60"
+          >
+            <ScanLine aria-hidden className="text-text-secondary" size={24} strokeWidth={2} />
+            <span>
+              <span className="block text-base font-semibold">{t("scan.title")}</span>
+              <span className="block text-sm text-text-secondary">{t("scan.comingSoon")}</span>
+            </span>
+          </div>
         ) : null}
         <button
           data-testid="choose-money-in"

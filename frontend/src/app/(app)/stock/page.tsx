@@ -12,6 +12,7 @@ import { Button } from "@/shared/design-system/Button";
 import { EmptyState } from "@/shared/design-system/EmptyState";
 import { SearchField } from "@/shared/design-system/SearchField";
 import { SkeletonList } from "@/shared/design-system/SkeletonList";
+import { SCAN_ENABLED } from "@/shared/flags";
 import { useT } from "@/shared/i18n";
 
 export default function StockPage() {
@@ -40,6 +41,7 @@ export default function StockPage() {
         <Button level="secondary" onClick={() => setImporting(true)} data-testid="wa-open">
           {t("wa.entry")}
         </Button>
+        {SCAN_ENABLED ? (
         <Link
           href="/labels"
           aria-label={t("scan.printLabels")}
@@ -48,6 +50,7 @@ export default function StockPage() {
         >
           <QrCode size={18} aria-hidden />
         </Link>
+        ) : null}
       </div>
 
       <WhatsAppImportSheet open={importing} onClose={() => setImporting(false)} />

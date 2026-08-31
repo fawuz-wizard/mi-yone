@@ -11,10 +11,21 @@ import { api } from "@/shared/api/client";
 import { BUSINESS_ID } from "@/shared/api/session";
 import { encodeProductQr } from "@/shared/qr";
 import type { Product } from "@/shared/api/types";
+import { SCAN_ENABLED } from "@/shared/flags";
 import { useT } from "@/shared/i18n";
 
 function LabelsInner() {
   const t = useT();
+  if (!SCAN_ENABLED) {
+    return (
+      <main className="min-h-dvh bg-white p-6 text-text-primary">
+        <p className="text-base font-semibold">{t("scan.comingSoon")}</p>
+        <Link href="/stock" className="mt-3 inline-block text-sm font-semibold underline">
+          {t("common.back")}
+        </Link>
+      </main>
+    );
+  }
   const params = useSearchParams();
   const only = params.get("only");
   const products = useQuery({

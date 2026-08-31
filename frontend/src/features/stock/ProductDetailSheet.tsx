@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/shared/design-system/ConfirmDialog";
 import { FormField } from "@/shared/design-system/FormField";
 import { useToast } from "@/shared/design-system/Toast";
 import { EMPTY_AMOUNT, fromMinor, isEmpty, toMinor, type AmountState } from "@/shared/design-system/amount";
+import { SCAN_ENABLED } from "@/shared/flags";
 import { useT } from "@/shared/i18n";
 import { PriceField } from "./PriceField";
 import { ProductFormSheet } from "./ProductFormSheet";
@@ -111,9 +112,11 @@ export function ProductDetailSheet({ productId, onClose }: { productId: string |
                   {t("stock.editProduct")}
                 </Button>
               </div>
-              <Button level="secondary" fullWidth onClick={() => setQrOpen(true)} data-testid="show-qr">
-                {t("scan.showQr")}
-              </Button>
+              {SCAN_ENABLED ? (
+                <Button level="secondary" fullWidth onClick={() => setQrOpen(true)} data-testid="show-qr">
+                  {t("scan.showQr")}
+                </Button>
+              ) : null}
               <Button level="tertiary" fullWidth onClick={() => setConfirmArchive(true)} data-testid="archive-product">
                 {t("stock.archive")}
               </Button>

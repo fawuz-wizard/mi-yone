@@ -78,6 +78,18 @@ silently refuse the camera and microphone.
   phone.
 - Printable QR labels: Stock → the QR icon → `/labels` → Print.
 
+## Feature switch: Scan-to-sell
+
+Scan-to-sell is LOCKED by default (shows "Coming very soon") while the product
+is with testers. To open it for a demo, start the frontend with:
+
+```bash
+NEXT_PUBLIC_MIYONE_SCAN=on MIYONE_BACKEND_URL=http://localhost:8000 npm run dev
+```
+
+(For a production build: `NEXT_PUBLIC_MIYONE_SCAN=on npm run build`. The E2E
+suite requires a flag-on build.)
+
 ## Optional environment variables (backend)
 
 All AI/integration features degrade honestly when unconfigured — nothing is faked.
