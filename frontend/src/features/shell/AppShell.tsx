@@ -8,6 +8,7 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 import { CaptureChooser, CaptureSheet, useCaptureController } from "@/features/capture/CaptureSheet";
 import type { CaptureKind } from "@/features/capture/machine";
 import { SyncBadge } from "@/shared/design-system/SyncBadge";
+import { useMe } from "@/shared/api/me";
 import { useT } from "@/shared/i18n";
 
 const CaptureContext = createContext<{ openChooser: () => void; openCapture: (k: CaptureKind) => void }>({
@@ -27,7 +28,10 @@ const NAV = [
   { href: "/menu", labelId: "nav.menu", Icon: MenuIcon },
 ] as const;
 
-export function AppShell({ businessName, initial, children }: { businessName: string; initial: string; children: ReactNode }) {
+export function AppShell({ children }: { children: ReactNode }) {
+  const me = useMe();
+  const businessName = me.data?.business?.name ?? "";
+  const initial = me.data?.business?.initial ?? "";
   const t = useT();
   const pathname = usePathname();
   const router = useRouter();

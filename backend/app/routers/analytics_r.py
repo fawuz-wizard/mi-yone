@@ -7,7 +7,7 @@ from ..core.deps import TenantContext, tenant
 from ..core.envelope import ok
 from ..ai.evidence import overview_line
 from ..services import analytics
-from ..services.watch import compute_watch
+from ..services.watch import compute_watch, filter_by_prefs
 
 router = APIRouter(prefix="/businesses/{bid}", tags=["analytics"])
 
@@ -41,7 +41,7 @@ def trends(range: str = "30d", ctx: TenantContext = Depends(tenant), db: Session
 
 @router.get("/watch")
 def watch(ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
-    return ok({"alerts": compute_watch(db, ctx.business.id)})
+    return ok({"alerts": filter_by_prefs(compute_watch(db, ctx.business.id), ctx.business)})
 
 
 @router.get("/reports")

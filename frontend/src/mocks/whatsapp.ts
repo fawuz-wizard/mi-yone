@@ -129,3 +129,10 @@ export function waSkip(itemId: string): { error?: { status: number; code: "CONFL
   if (state.latest) recount(state.latest);
   return { item };
 }
+
+// MOCK: disconnect — the connection goes, products and history stay.
+export function disconnect(): boolean {
+  if (!state.connection) return false;
+  state.connection = null;
+  return true;
+}

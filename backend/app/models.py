@@ -53,6 +53,9 @@ class Business(Base):
     currency: Mapped[str] = mapped_column(String(3), default="SLE")
     country: Mapped[str] = mapped_column(String(2), default="SL")
     status: Mapped[str] = mapped_column(String(16), default="ACTIVE")
+    # Business Watch alert preferences (JSON: {"stock":bool,"debts":bool,
+    # "money":bool,"records":bool}); NULL = everything on (the safe default).
+    alert_prefs: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

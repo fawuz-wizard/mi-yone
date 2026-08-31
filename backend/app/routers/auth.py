@@ -135,4 +135,91 @@ def logout(request: Request, db: Session = Depends(get_db)):
 @router.get("/me")
 def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
     business = _first_business(db, user)
-    return ok({"user": {"name": user.full_name}, "business": _business_json(business) if business else None})
+    return ok({"user": {"name": user.full_name, "phone": user.phone, "email": user.email},
+               "business": _business_json(business) if business else None})
+
+
+# ---------------------------------------------------------------------------
+# Settings center (owner brief): profile, password, sessions — all on the
+# EXISTING opaque-session architecture. No second auth system.
+# ---------------------------------------------------------------------------
+
+class UpdateMeInput(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    phone: str | None = Field(default=None, max_length=40)
+    email: str | None = Field(default=None, max_length=255)
+
+
+@router.patch("/me")
+def update_me(body: UpdateMeInput, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if body.name is not None and body.name.strip():
+        user.full_name = body.name.strip()
+    if body.phone is not None:
+        user.phone = body.phone.strip() or None
+    if body.email is not None and body.email.strip():
+        email = body.email.strip().lower()
+        if email != user.email:
+            if "@" not in email or db.scalar(select(User).where(User.email == email)) is not None:
+                raise ApiError(422, "VALIDATION_ERROR", "That email can't be used.")
+            user.email = email
+    audit(db, None, user.full_name, "auth.profile_update", "user", user.id)
+    business = _first_business(db, user)
+    return ok({"user": {"name": user.full_name, "phone": user.phone, "email": user.email},
+               "business": _business_json(business) if business else None})
+
+
+class ChangePasswordInput(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=10, max_length=200)
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordInput, request: Request,
+    user: User = Depends(current_user), db: Session = Depends(get_db),
+):
+    if not verify_password(user.password_hash, body.current_password):
+        raise ApiError(422, "VALIDATION_ERROR", "The current password is not correct.")
+    user.password_hash = hash_password(body.new_password)
+    # Changing the password signs out every OTHER device — the standard
+    # protective move; this session continues.
+    token = request.cookies.get(settings.session_cookie)
+    current_hash = hash_token(token) if token else None
+    for s in db.scalars(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))):
+        if s.token_hash != current_hash:
+            s.revoked_at = utcnow()
+    audit(db, None, user.full_name, "auth.password_change", "user", user.id)
+    return ok({})
+
+
+@router.get("/sessions")
+def sessions(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    token = request.cookies.get(settings.session_cookie)
+    current_hash = hash_token(token) if token else None
+    now = utcnow()
+    rows = [
+        s for s in db.scalars(
+            select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))
+            .order_by(AuthSession.created_at.desc())
+        )
+        if s.expires_at > now
+    ]
+    return ok({
+        "sessions": [
+            {"id": s.id, "created_at": s.created_at.isoformat(), "current": s.token_hash == current_hash}
+            for s in rows
+        ]
+    })
+
+
+@router.post("/sessions/sign-out-others")
+def sign_out_others(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    token = request.cookies.get(settings.session_cookie)
+    current_hash = hash_token(token) if token else None
+    count = 0
+    for s in db.scalars(select(AuthSession).where(AuthSession.user_id == user.id, AuthSession.revoked_at.is_(None))):
+        if s.token_hash != current_hash:
+            s.revoked_at = utcnow()
+            count += 1
+    audit(db, None, user.full_name, "auth.signout_others", "user", user.id, str(count))
+    return ok({"signed_out": count})

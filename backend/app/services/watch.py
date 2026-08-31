@@ -44,6 +44,41 @@ def _alert(id_: str, severity: str, what: str, why: str, action: str, target: st
     return {"id": id_, "severity": severity, "what": what, "why": why, "action": action, "target": target}
 
 
+# Alert-id prefix → owner-facing preference category (Menu → Alerts).
+_PREF_OF = (
+    ("watch-out-of-stock", "stock"), ("watch-low-stock", "stock"),
+    ("watch-overdue", "debts"), ("watch-payable-due", "debts"),
+    ("watch-sales-down", "money"), ("watch-expenses-up", "money"),
+    ("watch-profit-down", "money"), ("watch-unusual-cost", "money"),
+    ("watch-incomplete", "records"),
+)
+
+
+def alert_prefs_of(business) -> dict:
+    import json
+    defaults = {"stock": True, "debts": True, "money": True, "records": True}
+    raw = getattr(business, "alert_prefs", None)
+    if not raw:
+        return defaults
+    try:
+        stored = json.loads(raw)
+        return {k: bool(stored.get(k, True)) for k in defaults}
+    except Exception:
+        return defaults
+
+
+def filter_by_prefs(alerts: list[dict], business) -> list[dict]:
+    """Owner preference filter (Menu → Alerts). Preferences only SILENCE
+    categories the owner turned off — nothing is ever added or invented."""
+    prefs = alert_prefs_of(business)
+    out = []
+    for a in alerts:
+        category = next((c for prefix, c in _PREF_OF if a["id"].startswith(prefix)), None)
+        if category is None or prefs.get(category, True):
+            out.append(a)
+    return out
+
+
 def compute_watch(db: Session, business_id: str) -> list[dict]:
     now = utcnow()
     alerts: list[dict] = []

@@ -37,7 +37,8 @@ contract. Phase 4 (design spec) is law for all UI work; Phase 2 for architecture
    focus ring, sr-labels, reduced-motion, 200% scaling. axe E2E scans must pass.
 10. **No**: gradients, AI sparkles/robots/glow, chart libraries, component
     libraries (MUI/Ant), Redux, styled-components, new dependencies without a
-    stated reason. Light theme only in v1.
+    stated reason. Themes: light + dark + system (owner brief superseded the
+    light-only v1 rule) — dark values live ONLY in tokens/dark.json.
 11. **Structure:** features are isolated (`src/features/*` never import each
     other); design-system components have no business logic or API calls; routes
     compose features. Follow existing patterns before creating new ones.
@@ -148,7 +149,20 @@ the clean intent name); Anthropic prompt now mirrors the owner's language
 number/number-word ("3"/"three"/"tri") answers a pending "how many?" by
 re-running the FULL interpreter on a synthesized phrase (all validation still
 applies). Mock partner has full parity (normalizeQ + lastContext).
-66 unit + 79 Playwright E2E green (vs mock AND real backend); 96 backend tests.
+Settings center (owner brief): Menu is the account/settings hub — profile
+card + edit (PATCH /auth/me), business settings (PATCH /businesses/{bid}),
+Appearance (light/dark/system, persisted, boot script prevents flash; dark =
+tokens/dark.json overrides emitted by the token pipeline as
+html[data-theme=dark], contrast-verified by a dark axe E2E), Alerts
+(business.alert_prefs JSON filters compute_watch server-side — silence only,
+never invent), WhatsApp manage/disconnect (status flip, history+products
+kept, reconnect reactivates), Help/Terms/Privacy/About (real content, drafts
+labeled "testing stage"), Security (change-password revokes other sessions;
+sessions list + sign-out-others), Sign out (confirm → logout → clears
+business id → /welcome). App identity now resolves CLIENT-side from /auth/me
+(shared/api/me.ts — fixed the shell reading the MOCK business name in real
+mode). Full mock parity.
+68 unit + 86 Playwright E2E green (vs mock AND real backend); 103 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

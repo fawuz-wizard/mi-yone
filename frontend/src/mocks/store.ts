@@ -21,6 +21,28 @@ import type {
 
 export const MOCK_USER = "Mariama";
 
+// MOCK settings-center state (parity with the new settings endpoints).
+export const profile = { name: "Mariama", phone: "+232 76 123456", email: "mariama@example.sl" };
+export const alertPrefs = { stock: true, debts: true, money: true, records: true };
+export function meJson() {
+  return { user: { ...profile }, business: { ...business } };
+}
+export function updateProfile(input: { name?: string; phone?: string; email?: string }) {
+  if (input.name?.trim()) profile.name = input.name.trim();
+  if (input.phone !== undefined) profile.phone = input.phone.trim();
+  if (input.email?.trim()) profile.email = input.email.trim().toLowerCase();
+  return meJson();
+}
+export function updateBusinessName(name: string) {
+  business.name = name.trim();
+  business.initial = business.name.slice(0, 1).toUpperCase();
+  return { ...business };
+}
+export function updateAlertPrefs(input: typeof alertPrefs) {
+  Object.assign(alertPrefs, input);
+  return { ...alertPrefs };
+}
+
 export const business: Business = {
   id: "b-demo-1",
   name: "Mariama's Provisions",
@@ -1320,7 +1342,14 @@ export function computeWatch(): WatchResponse {
 
   const order = { critical: 0, warning: 1, info: 2 } as const;
   alerts.sort((a, b) => order[a.severity] - order[b.severity]);
-  return { alerts };
+  // Owner alert preferences (Menu → Alerts) — silence only, never invent.
+  const prefOf = (id: string) =>
+    id.startsWith("watch-out-of-stock") || id.startsWith("watch-low-stock") ? "stock"
+    : id.startsWith("watch-overdue") || id.startsWith("watch-payable-due") ? "debts"
+    : id.startsWith("watch-sales-down") || id.startsWith("watch-expenses-up") || id.startsWith("watch-profit-down") || id.startsWith("watch-unusual-cost") ? "money"
+    : id.startsWith("watch-incomplete") ? "records"
+    : null;
+  return { alerts: alerts.filter((a) => { const c = prefOf(a.id); return c === null || alertPrefs[c as keyof typeof alertPrefs]; }) };
 }
 
 const TREND_RANGES: Record<string, number> = { "7d": 7, "30d": 30, "3m": 91, "6m": 182, "1y": 365 };

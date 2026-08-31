@@ -31,7 +31,13 @@ def _name_tokens(name: str) -> set[str]:
 
 
 def get_connection(db: Session, business_id: str) -> CatalogConnection | None:
-    return db.scalar(select(CatalogConnection).where(CatalogConnection.business_id == business_id, CatalogConnection.provider == "whatsapp"))
+    return db.scalar(
+        select(CatalogConnection).where(
+            CatalogConnection.business_id == business_id,
+            CatalogConnection.provider == "whatsapp",
+            CatalogConnection.status == "CONNECTED",
+        )
+    )
 
 
 def connect(db: Session, business_id: str, actor: str) -> CatalogConnection:
@@ -39,6 +45,18 @@ def connect(db: Session, business_id: str, actor: str) -> CatalogConnection:
     if existing:
         return existing
     provider = get_catalog_provider()  # live mode validates credentials here — no fake connections
+    # A previously disconnected connection is reactivated, keeping its history.
+    dormant = db.scalar(
+        select(CatalogConnection).where(
+            CatalogConnection.business_id == business_id, CatalogConnection.provider == "whatsapp"
+        )
+    )
+    if dormant is not None:
+        dormant.status = "CONNECTED"
+        dormant.mode = provider.mode
+        audit(db, business_id, actor, "catalog.reconnect", "catalog_connection", dormant.id, provider.mode)
+        db.flush()
+        return dormant
     conn = CatalogConnection(id=gen_id("wac"), business_id=business_id, provider="whatsapp", mode=provider.mode, status="CONNECTED")
     db.add(conn)
     audit(db, business_id, actor, "catalog.connect", "catalog_connection", conn.id, provider.mode)

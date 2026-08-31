@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from .core.db import SessionLocal
 from .core.envelope import install_handlers, ok
-from .routers import analytics_r, auth, finance_r, integrations_r, parties_r, partner_r, stock_r, trade_r
+from .routers import analytics_r, auth, finance_r, integrations_r, parties_r, partner_r, settings_r, stock_r, trade_r
 
 logger = logging.getLogger("miyone")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -51,6 +51,7 @@ _ADDITIVE_COLUMNS = (
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
     "ALTER TABLE catalog_import_items ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
+    "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS alert_prefs VARCHAR(200)",
     "UPDATE debts SET created_at = since WHERE created_at IS NULL",
     "UPDATE sales SET created_at = occurred_at WHERE created_at IS NULL",
     "UPDATE inventory_movements SET created_at = occurred_at WHERE created_at IS NULL",
@@ -77,6 +78,7 @@ app.include_router(trade_r.router, prefix=API)
 app.include_router(analytics_r.router, prefix=API)
 app.include_router(partner_r.router, prefix=API)
 app.include_router(integrations_r.router, prefix=API)
+app.include_router(settings_r.router, prefix=API)
 
 
 @app.get("/health")

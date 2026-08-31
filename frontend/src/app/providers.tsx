@@ -1,10 +1,15 @@
 "use client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { I18nProvider } from "@/shared/i18n";
+import { applyTheme, watchSystemTheme } from "@/shared/theme";
 import { ToastProvider } from "@/shared/design-system/Toast";
 
 export function Providers({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    applyTheme();
+    watchSystemTheme();
+  }, []);
   const [client] = useState(
     () =>
       new QueryClient({
