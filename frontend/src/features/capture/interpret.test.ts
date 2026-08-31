@@ -366,3 +366,35 @@ describe("parseBareQuantity", () => {
     expect(parseBareQuantity("hello")).toBeNull();
   });
 });
+
+// --- Ambiguous totals (owner hardening brief, P0-4) -------------------------
+describe("a bare number beside a quantity is never assumed", () => {
+  const ctx = { products: [], customers: [], suppliers: [], categories: [], recentTransactions: [] };
+
+  it("asks whether 'sold 3 bags rice 350' means each or altogether", () => {
+    const r = interpretEntry("sold 3 bags rice 350", ctx);
+    const issue = r.issues.find((i) => i.id === "ambiguousTotal");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("block");
+    expect(r.totalMinor).toBeNull(); // nothing is recorded until the owner says
+    expect(issue?.params?.each).toBe("Le 1,050");
+    expect(issue?.params?.total).toBe("Le 350");
+  });
+
+  it("does not ask when the owner said 'each'", () => {
+    const r = interpretEntry("sold 3 bags rice at 350 each", ctx);
+    expect(r.issues.find((i) => i.id === "ambiguousTotal")).toBeUndefined();
+    expect(r.totalMinor).toBe(105000);
+  });
+
+  it("does not ask when the owner said a total", () => {
+    const r = interpretEntry("sold 3 bags rice for 350 total", ctx);
+    expect(r.issues.find((i) => i.id === "ambiguousTotal")).toBeUndefined();
+    expect(r.totalMinor).toBe(35000);
+  });
+
+  it("does not ask for a single item", () => {
+    const r = interpretEntry("sold rice 350", ctx);
+    expect(r.issues.find((i) => i.id === "ambiguousTotal")).toBeUndefined();
+  });
+});

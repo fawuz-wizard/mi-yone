@@ -70,6 +70,7 @@ export type InterpretIssueId =
   | "usedCatalogPrice" // no price in text — used the product's own set price
   | "usedCatalogCost" // no cost in text — used the product's own cost price
   | "conflictTotal" // stated total ≠ quantity × unit price — owner must decide
+  | "ambiguousTotal" // one bare number beside a quantity: each, or altogether?
   | "unknownProduct" // text names a product that is not in the records
   | "productRequired" // a purchase must point at a real product
   | "ambiguousProduct" // more than one product matches — owner must pick
@@ -308,6 +309,10 @@ const UNUSUAL_LOW = 0.5; // ≤50% of the recorded price
 // The interpreter.
 // ---------------------------------------------------------------------------
 
+function formatAmount(whole: number): string {
+  return `Le ${String(Math.round(whole)).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+}
+
 export function interpretEntry(
   text: string,
   ctx: InterpretContext,
@@ -369,6 +374,10 @@ export function interpretEntry(
   let statedTotal: number | null = null;
   let paidAmount: number | null = null;
   const leftovers: number[] = [];
+  // Did the owner actually SAY how to read a number? Without "each" or a total
+  // word, one bare number beside a quantity is genuinely ambiguous.
+  let eachWordSeen = false;
+  let totalWordSeen = false;
 
   const wordAt = (i: number): string | null => {
     const t = toks[i];
@@ -383,6 +392,7 @@ export function interpretEntry(
     const isInt = Number.isInteger(t.value);
 
     if (next !== null && EACH_WORDS.has(next)) {
+      eachWordSeen = true;
       if (unitPrice === null) unitPrice = t.value;
       else leftovers.push(t.value);
     } else if (prev !== null && AT_WORDS.has(prev)) {
@@ -393,12 +403,14 @@ export function interpretEntry(
       else leftovers.push(t.value);
     } else if (prev === "for") {
       // "for 350 each" was caught by the EACH rule; plain "for X" reads as a total
+      totalWordSeen = true;
       if (statedTotal === null) statedTotal = t.value;
       else leftovers.push(t.value);
     } else if (next !== null && (UNIT_WORDS.has(next) || nouns.has(next) || next === "x")) {
       if (quantity === null && isInt && t.value > 0 && t.value <= 9999) quantity = t.value;
       else leftovers.push(t.value);
     } else if (next !== null && TOTAL_WORDS.has(next)) {
+      totalWordSeen = true;
       if (statedTotal === null) statedTotal = t.value;
       else leftovers.push(t.value);
     } else if (prev !== null && (SALE_VERBS.has(prev) || BUY_VERBS.has(prev)) && isInt && t.value > 0 && t.value <= 9999) {
@@ -522,6 +534,16 @@ export function interpretEntry(
     } else if (unitPrice !== null && quantity === null) {
       block("missingQuantity");
       totalMinor = statedTotal !== null ? toMinorUnits(statedTotal) : null;
+    } else if (statedTotal !== null && quantity !== null && quantity > 1 && !totalWordSeen && !eachWordSeen) {
+      // "Sold 3 bags rice 350" — owners drop "each" constantly, and one bare
+      // number after a quantity means either Le 350 per bag or Le 350 for all
+      // three. Guessing was worth two thirds of the money on a clean-looking
+      // card. Ask instead: never silently assume.
+      block("ambiguousTotal", {
+        each: formatAmount(statedTotal * quantity),
+        total: formatAmount(statedTotal),
+      });
+      totalMinor = null;
     } else if (statedTotal !== null) {
       totalMinor = toMinorUnits(statedTotal);
     } else if (paidAmount !== null && !creditStated) {

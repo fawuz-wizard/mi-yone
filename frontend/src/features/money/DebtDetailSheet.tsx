@@ -10,8 +10,9 @@ import { Button } from "@/shared/design-system/Button";
 import { MoneyDisplay } from "@/shared/design-system/MoneyDisplay";
 import { useToast } from "@/shared/design-system/Toast";
 import { EMPTY_AMOUNT, fromMinor, isEmpty, toMinor, type AmountState } from "@/shared/design-system/amount";
+import { ConfirmDialog } from "@/shared/design-system/ConfirmDialog";
 import { useT } from "@/shared/i18n";
-import { useSettleDebt } from "./api";
+import { useRemoveDebt, useSettleDebt } from "./api";
 
 export function DebtDetailSheet({
   debt,
@@ -25,7 +26,9 @@ export function DebtDetailSheet({
   const t = useT();
   const toast = useToast();
   const settle = useSettleDebt();
+  const remove = useRemoveDebt();
   const [paying, setPaying] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [amount, setAmount] = useState<AmountState>(EMPTY_AMOUNT);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +37,7 @@ export function DebtDetailSheet({
 
   function closeAll() {
     setPaying(false);
+    setConfirmingRemove(false);
     setAmount(EMPTY_AMOUNT);
     setError(null);
     onClose();
@@ -87,8 +91,35 @@ export function DebtDetailSheet({
             {t("debt.since", { date: new Date(debt.since).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) })}
             {debt.overdue ? ` · ${t("debt.overdue")}` : ""}
           </p>
+          {/* A stock purchase's debt is part of a bigger record, so removing it
+              here would leave the stock and the expense standing. */}
+          {debt.source !== "PURCHASE" ? (
+            <Button level="tertiary" fullWidth onClick={() => setConfirmingRemove(true)} data-testid="debt-remove">
+              {t("debt.remove")}
+            </Button>
+          ) : null}
         </div>
       </BottomSheet>
+
+      <ConfirmDialog
+        open={confirmingRemove}
+        title={t("debt.removeTitle")}
+        body={t("debt.removeBody")}
+        confirmLabel={t("debt.remove")}
+        cancelLabel={t("common.cancel")}
+        destructive
+        onConfirm={() => {
+          const id = debt?.id;
+          if (!id) return;
+          remove.mutate(id, {
+            onSuccess: () => {
+              toast.show({ message: t("debt.removedToast") });
+              closeAll();
+            },
+          });
+        }}
+        onCancel={() => setConfirmingRemove(false)}
+      />
 
       <BottomSheet
         open={paying}

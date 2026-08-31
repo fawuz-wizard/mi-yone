@@ -19,9 +19,15 @@ from ..models import CatalogConnection, CatalogImport, CatalogImportItem, Produc
 from ..services import inventory
 from ..services.finance import audit
 
+# Packaging, unit and filler words say nothing about WHAT a product is.
+# Matching on one of them warned that "Palm oil" may already exist as
+# "Coconut oil" — a confident, wrong duplicate warning.
 UNIT_WORDS = {
-    "bag", "bags", "piece", "pieces", "kg", "kilo", "cup", "packet", "bottle",
-    "carton", "bar", "bars", "tin", "tins", "box", "pack", "pair", "litre", "liter",
+    "bag", "bags", "piece", "pieces", "kg", "kilo", "kilos", "cup", "cups",
+    "packet", "packets", "bottle", "bottles", "carton", "cartons", "bar",
+    "bars", "tin", "tins", "box", "boxes", "pack", "packs", "pair", "litre",
+    "liter", "litres", "liters", "sachet", "sachets", "crate", "crates",
+    "small", "large", "big", "the",
 }
 
 

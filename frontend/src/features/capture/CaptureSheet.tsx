@@ -10,7 +10,7 @@ import { Button } from "@/shared/design-system/Button";
 import { ChipPicker } from "@/shared/design-system/ChipPicker";
 import { ConfirmDialog } from "@/shared/design-system/ConfirmDialog";
 import { useToast } from "@/shared/design-system/Toast";
-import { EMPTY_AMOUNT, fromMinor, isEmpty, toMinor, type AmountState } from "@/shared/design-system/amount";
+import { EMPTY_AMOUNT, fromMinor, isEmpty, toDisplay, toMinor, type AmountState } from "@/shared/design-system/amount";
 import { isDomainError } from "@/shared/api/client";
 import { captureQueue } from "@/shared/capture-queue";
 import { SCAN_ENABLED } from "@/shared/flags";
@@ -75,6 +75,10 @@ export function CaptureSheet({
   const [note, setNote] = useState("");
   const [productId, setProductId] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
+  // A blocking issue from the last interpretation, still unresolved. The
+  // interpreter has always marked these; nothing enforced them, so a record it
+  // explicitly refused to complete could still be saved with a guessed value.
+  const [pendingBlock, setPendingBlock] = useState<string | null>(null);
   const [payment, setPayment] = useState<"PAID" | "OWES">("PAID");
   const [customerId, setCustomerId] = useState<string | null>(null);
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -94,6 +98,7 @@ export function CaptureSheet({
 
   const reset = useCallback(() => {
     setAmount(EMPTY_AMOUNT);
+    setPendingBlock(null);
     setNote("");
     setProductId(null);
     setQuantity(1);
@@ -119,6 +124,7 @@ export function CaptureSheet({
   function applyProduct(id: string | null, qty: number, overrideMinor: number | null = unitOverrideMinor) {
     setProductId(id);
     setQuantity(qty);
+    setPendingBlock(null); // choosing a quantity answers a quantity question
     const product = products.data?.find((p) => p.id === id);
     const unitMinor = overrideMinor ?? product?.selling_price.amount_minor;
     if (product && unitMinor) setAmount(fromMinor(unitMinor * qty));
@@ -134,6 +140,7 @@ export function CaptureSheet({
     setAmount(r.totalMinor !== null ? fromMinor(r.totalMinor) : EMPTY_AMOUNT);
     setProductId(r.productId);
     setQuantity(r.quantity ?? 1);
+    setPendingBlock(r.issues.find((i) => i.severity === "block")?.id ?? null);
     const derivedUnit =
       r.unitPriceMinor ??
       (r.totalMinor !== null && r.quantity && r.totalMinor % r.quantity === 0 ? r.totalMinor / r.quantity : null);
@@ -151,6 +158,7 @@ export function CaptureSheet({
   // Expense routed from the quick entry: switch the sheet to the expense form.
   function applyInterpretedExpense(r: InterpretedSale) {
     if (state.name === "IDLE") return;
+    setPendingBlock(r.issues.find((i) => i.severity === "block")?.id ?? null);
     setEntryMethod(r.origin ?? "text");
     setState({ name: "EDITING", kind: "expense", idempotencyKey: state.idempotencyKey });
     setAmount(r.totalMinor !== null ? fromMinor(r.totalMinor) : EMPTY_AMOUNT);
@@ -234,7 +242,9 @@ export function CaptureSheet({
         setState(submitFailedNetwork({ name: "SUBMITTING", kind, idempotencyKey }));
         captureQueue.enqueue({
           idempotencyKey,
-          label: t(kind === "sale" ? "capture.sale" : "capture.expense"),
+          // Two pending sales were indistinguishable in the list; the amount is what
+// tells the owner which record is still waiting.
+        label: `${t(kind === "sale" ? "capture.sale" : "capture.expense")} · ${toDisplay(amount)}`,
           submittedAt: Date.now(),
           state: "pending",
           retry: async () => {
@@ -277,7 +287,7 @@ export function CaptureSheet({
           <Button
             fullWidth
             onClick={() => void submit()}
-            disabled={isEmpty(amount) || needsCustomer}
+            disabled={isEmpty(amount) || needsCustomer || pendingBlock !== null}
             loading={state.name === "SUBMITTING"}
             loadingLabel={t("common.save")}
             data-testid="capture-save"
@@ -311,6 +321,7 @@ export function CaptureSheet({
             value={amount}
             onChange={(next) => {
               setAmount(next);
+              setPendingBlock(null); // typing the amount answers the question
               if (state.name === "OPEN") setState({ ...state, name: "EDITING" });
             }}
           />

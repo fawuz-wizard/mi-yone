@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 from ..core.db import get_db
 from ..core.deps import TenantContext, tenant, tenant_admin
 from ..core.envelope import ApiError, ok
-from ..models import Category, Transaction
+from ..models import Category, Sale, Transaction
 from ..serializers import tx_json
-from ..services import finance
+from ..services import finance, trade
 
 router = APIRouter(prefix="/businesses/{bid}", tags=["finance"])
 
@@ -101,5 +101,12 @@ def fix_transaction(tx_id: str, body: FixInput, ctx: TenantContext = Depends(ten
 
 @router.post("/transactions/{tx_id}/reverse")
 def reverse_transaction(tx_id: str, ctx: TenantContext = Depends(tenant_admin), db: Session = Depends(get_db)):
-    finance.reverse_transaction(db, ctx.business.id, ctx.user.full_name, tx_id)
+    # If this row is the cash side of a sale, removing it removes the WHOLE
+    # sale — stock, credit and payments included. Reversing the cash alone used
+    # to leave the sale counted, the stock short and the debt outstanding.
+    sale = db.scalar(select(Sale).where(Sale.cash_transaction_id == tx_id, Sale.business_id == ctx.business.id))
+    if sale is not None:
+        trade.reverse_sale(db, ctx.business.id, ctx.user.full_name, sale.id)
+    else:
+        finance.reverse_transaction(db, ctx.business.id, ctx.user.full_name, tx_id)
     return ok({"reversed": True})

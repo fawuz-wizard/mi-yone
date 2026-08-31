@@ -181,6 +181,7 @@ export function createTransaction(
     counterparty_id?: string;
     source: Transaction["source"];
     entry_method?: "manual" | "text" | "voice" | "scan";
+    debt_id?: string;
   },
   idempotencyKey: string | null,
 ): { transaction: Transaction; replay: boolean } {
@@ -202,6 +203,7 @@ export function createTransaction(
     status: "POSTED",
     amount: formatMoney(input.amount_minor),
     category_name: categoryName(input.category_id, input.type),
+    debt_id: input.debt_id ?? null,
     description: input.description ?? null,
     occurred_at: occurredAt,
     created_at: now,
@@ -260,10 +262,16 @@ export function fixTransaction(
   return corrected;
 }
 
-export function reverseTransaction(txId: string): boolean {
+function reverseOneTransaction(txId: string): boolean {
   const original = transactions.find((t) => t.id === txId && t.status === "POSTED");
   if (!original) return false;
   original.status = "REVERSED";
+  // A payment applied to a debt must give the amount back, or the debt stays
+  // marked paid and nobody ever chases it again.
+  if (original.source === "SETTLEMENT" && original.debt_id) {
+    const debt = debts.find((d) => d.id === original.debt_id);
+    if (debt) debt.settled_minor = Math.max(0, debt.settled_minor - original.amount.amount_minor);
+  }
   const now = new Date().toISOString();
   transactions.push({
     ...original,
@@ -274,6 +282,48 @@ export function reverseTransaction(txId: string): boolean {
     reverses_transaction_id: original.id,
   });
   return true;
+}
+
+/** MOCK parity with backend trade.reverse_sale: removing a sale removes ALL of
+ *  it — cash, stock, credit and any payments made against that credit. */
+function reverseSaleRow(sale: (typeof saleLog)[number]): boolean {
+  if (sale.status !== "POSTED") return false;
+  if (sale.cash_transaction_id) reverseOneTransaction(sale.cash_transaction_id);
+  if (sale.receivable_id) {
+    const debt = debts.find((d) => d.id === sale.receivable_id);
+    if (debt && (debt.status ?? "POSTED") === "POSTED") {
+      transactions
+        .filter((t) => t.debt_id === debt.id && t.status === "POSTED" && t.reverses_transaction_id === null)
+        .forEach((t) => reverseOneTransaction(t.id));
+      debt.status = "REVERSED";
+    }
+  }
+  movements.filter((m) => m.sale_id === sale.id && (m.status ?? "POSTED") === "POSTED").forEach((m) => {
+    m.status = "REVERSED";
+  });
+  sale.status = "REVERSED";
+  return true;
+}
+
+export function reverseTransaction(txId: string): boolean {
+  const sale = saleLog.find((s) => s.cash_transaction_id === txId);
+  if (sale) return reverseSaleRow(sale);
+  return reverseOneTransaction(txId);
+}
+
+export function reverseDebt(debtId: string): { ok: boolean; reason?: "purchase" } {
+  const row = debts.find((d) => d.id === debtId);
+  if (!row || (row.status ?? "POSTED") !== "POSTED") return { ok: false };
+  if (row.source === "SALE") {
+    const sale = saleLog.find((s) => s.receivable_id === row.id);
+    if (sale) return { ok: reverseSaleRow(sale) };
+  }
+  if (row.source === "PURCHASE") return { ok: false, reason: "purchase" };
+  transactions
+    .filter((t) => t.debt_id === row.id && t.status === "POSTED" && t.reverses_transaction_id === null)
+    .forEach((t) => reverseOneTransaction(t.id));
+  row.status = "REVERSED";
+  return { ok: true };
 }
 
 // Visible ledger rows: POSTED, non-reversal rows (reversal rows are audit-only).
@@ -477,6 +527,13 @@ const productRows: ProductRow[] = [
 
 const movements: StockMovement[] = [];
 
+/** A REVERSED movement stays in the history but stops counting toward stock,
+ *  units sold, price history and alerts — MOCK parity with the backend's
+ *  inventory.posted_movements. */
+function postedMovements(): StockMovement[] {
+  return movements.filter((m) => (m.status ?? "POSTED") === "POSTED");
+}
+
 function addMovement(
   productId: string,
   type: MovementType,
@@ -484,6 +541,7 @@ function addMovement(
   unitCostMinor: number | null,
   note: string | null = null,
   occurredAt: string = new Date().toISOString(),
+  saleId: string | null = null,
 ): StockMovement {
   const m: StockMovement = {
     id: id("mv"),
@@ -492,15 +550,18 @@ function addMovement(
     quantity_delta: quantityDelta,
     unit_cost: unitCostMinor === null ? null : formatMoney(unitCostMinor),
     occurred_at: occurredAt,
+    created_at: occurredAt,
     recorded_by: MOCK_USER,
     note,
+    status: "POSTED",
+    sale_id: saleId,
   };
   movements.push(m);
   return m;
 }
 
 // Seed opening stock as PURCHASE movements (the ledger is the source of truth).
-addMovement("p-101", "PURCHASE", 12, 70_000_00, null, daysAgo(20, 8));
+addMovement("p-101", "PURCHASE", 60, 70_000_00, null, daysAgo(20, 8));
 addMovement("p-102", "PURCHASE", 5, 24_000_00, null, daysAgo(15, 8));
 addMovement("p-102", "SALE", -2, null, null, daysAgo(3, 12));
 addMovement("p-103", "PURCHASE", 40, 3_600_00, null, daysAgo(10, 8));
@@ -508,7 +569,7 @@ addMovement("p-104", "PURCHASE", 60, 1_000_00, null, daysAgo(25, 8));
 addMovement("p-104", "SALE", -2, null, null, daysAgo(2, 15));
 
 export function stockOf(productId: string): number {
-  return movements.filter((m) => m.product_id === productId).reduce((a, m) => a + m.quantity_delta, 0);
+  return postedMovements().filter((m) => m.product_id === productId).reduce((a, m) => a + m.quantity_delta, 0);
 }
 
 export function toProduct(row: ProductRow): Product {
@@ -539,7 +600,7 @@ export function toProduct(row: ProductRow): Product {
 // serializers.recent_sale_prices).
 function recentSalePrices(productId: string): Money[] {
   const seen: number[] = [];
-  const rows = movements
+  const rows = postedMovements()
     .filter((m) => m.product_id === productId && m.type === "SALE" && m.unit_cost !== null)
     .sort((a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime())
     .slice(0, 10);
@@ -562,7 +623,16 @@ export function getProductRow(idOrNull: string | undefined | null): ProductRow |
   return productRows.find((r) => r.id === idOrNull);
 }
 
+/** Aggregation view: posted movements only. Everything that counts stock,
+ *  units sold or price history reads this. */
 export function productMovements(productId: string): StockMovement[] {
+  return postedMovements()
+    .filter((m) => m.product_id === productId)
+    .sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
+}
+
+/** History view: includes removed movements, which stay visible and marked. */
+export function productMovementHistory(productId: string): StockMovement[] {
   return movements.filter((m) => m.product_id === productId).sort((a, b) => b.occurred_at.localeCompare(a.occurred_at));
 }
 
@@ -763,6 +833,7 @@ interface DebtRow {
   since: string;
   due_date: string | null;
   source: "SALE" | "MANUAL" | "PURCHASE";
+  status?: "POSTED" | "REVERSED";
 }
 
 const debts: DebtRow[] = [
@@ -773,15 +844,54 @@ const debts: DebtRow[] = [
 
 // Sale log: one row per sale (cash, credit, or partial) — the truthful basis for
 // sales counts/totals in reports without double-counting partial sales.
-const saleLog: { at: string; total_minor: number }[] = [];
+const saleLog: {
+  id: string;
+  at: string;
+  total_minor: number;
+  status: "POSTED" | "REVERSED";
+  cash_transaction_id: string | null;
+  receivable_id: string | null;
+}[] = [];
 // Seed the log from the seeded sale transactions so historic reports are truthful.
 transactions
   .filter((t) => t.source === "SALE" && t.type === "INCOME")
-  .forEach((t) => saleLog.push({ at: t.occurred_at, total_minor: t.amount.amount_minor }));
+  .forEach((t) =>
+    saleLog.push({
+      id: id("s"), at: t.occurred_at, total_minor: t.amount.amount_minor,
+      status: "POSTED", cash_transaction_id: t.id, receivable_id: null,
+    }),
+  );
+
+// MOCK parity with backend serializers.OVERDUE_AFTER_DAYS.
+const OVERDUE_AFTER_DAYS = 30;
+
+function debtAgeDays(row: DebtRow): number {
+  return Math.max(0, Math.floor((Date.now() - new Date(row.since).getTime()) / 86400000));
+}
+
+function debtIsOverdue(row: DebtRow): boolean {
+  const outstanding = row.amount_minor - row.settled_minor;
+  if (outstanding <= 0 || (row.status ?? "POSTED") !== "POSTED") return false;
+  if (row.due_date !== null) return new Date(row.due_date).getTime() < Date.now();
+  return debtAgeDays(row) >= OVERDUE_AFTER_DAYS;
+}
+
+// MOCK parity with backend watch._weeks / MIN_CHANGE_MINOR / MAX_ALERTS.
+function weeksWord(days: number): string {
+  if (days < 14) return `${Math.round(days)} days`;
+  if (days < 60) return `${Math.floor(days / 7)} weeks`;
+  return `${Math.floor(days / 30)} months`;
+}
+const MIN_CHANGE_MINOR = 10_000_00;
+const MAX_ALERTS = 5;
+const isMaterial = (cur: number, prev: number) => Math.abs(cur - prev) >= MIN_CHANGE_MINOR;
+
+function postedSales() {
+  return saleLog.filter((s) => s.status === "POSTED");
+}
 
 function toDebt(row: DebtRow): Debt {
   const outstanding = row.amount_minor - row.settled_minor;
-  const overdue = row.due_date !== null && new Date(row.due_date).getTime() < Date.now() && outstanding > 0;
   return {
     id: row.id,
     counterparty_id: row.counterparty_id,
@@ -790,14 +900,16 @@ function toDebt(row: DebtRow): Debt {
     outstanding: formatMoney(outstanding),
     since: row.since,
     due_date: row.due_date,
-    overdue,
+    overdue: debtIsOverdue(row),
+    days_owed: debtAgeDays(row),
+    source: row.source,
     status: outstanding === 0 ? "SETTLED" : row.settled_minor > 0 ? "PARTIAL" : "OPEN",
   };
 }
 
 export function listDebts(kind: "receivable" | "payable"): Debt[] {
   return debts
-    .filter((d) => d.kind === kind && d.amount_minor - d.settled_minor > 0)
+    .filter((d) => d.kind === kind && (d.status ?? "POSTED") === "POSTED" && d.amount_minor - d.settled_minor > 0)
     .map(toDebt)
     .sort((a, b) => Number(b.overdue) - Number(a.overdue) || a.since.localeCompare(b.since));
 }
@@ -821,12 +933,15 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
   if (credit > 0 && !input.customer_id) return null;
 
   // Stock leaves via a SALE movement on the ledger (never a naked decrement).
-  // Negative stock is allowed with a warning surface, not blocked (Phase 2 §10).
+  // MOCK parity with backend trade.create_sale: the same hard stock check the
+  // multi-item checkout already made — a shop cannot sell what it does not have.
+  const saleId = id("s");
   const product = getProductRow(input.product_id);
   if (product && product.track) {
     const qty = input.quantity ?? 1;
+    if (qty > stockOf(product.id)) return null;
     const unitValue = total % qty === 0 ? total / qty : null;
-    addMovement(product.id, "SALE", -qty, unitValue);
+    addMovement(product.id, "SALE", -qty, unitValue, null, new Date().toISOString(), saleId);
   }
 
   let transaction = null;
@@ -860,7 +975,10 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
     debts.push(row);
     receivable = toDebt(row);
   }
-  saleLog.push({ at: new Date().toISOString(), total_minor: total });
+  saleLog.push({
+    id: saleId, at: new Date().toISOString(), total_minor: total, status: "POSTED",
+    cash_transaction_id: transaction?.id ?? null, receivable_id: receivable?.id ?? null,
+  });
   const result: SaleResult = { transaction, receivable, total: formatMoney(total) };
   if (idempotencyKey) saleIdempotency.set(idempotencyKey, result);
   return { result, replay: false };
@@ -870,7 +988,7 @@ const saleIdempotency = new Map<string, SaleResult>();
 
 export function settleDebt(debtId: string, amountMinor: number): SettlementResult | null {
   const row = debts.find((d) => d.id === debtId);
-  if (!row) return null;
+  if (!row || (row.status ?? "POSTED") !== "POSTED") return null;
   const outstanding = row.amount_minor - row.settled_minor;
   if (amountMinor <= 0 || amountMinor > outstanding) return null; // over-settlement rejected (Phase 2 M7)
   row.settled_minor += amountMinor;
@@ -882,6 +1000,7 @@ export function settleDebt(debtId: string, amountMinor: number): SettlementResul
       description: isReceivable ? `Payment from ${row.counterparty_name}` : `Payment to ${row.counterparty_name}`,
       counterparty_id: row.counterparty_id,
       source: "SETTLEMENT",
+      debt_id: row.id,
     },
     null,
   );
@@ -1076,22 +1195,29 @@ export function report(period: ReportPeriod): ReportResponse {
     rows.filter((t) => t.type === "EXPENSE" && t.source !== "SETTLEMENT").reduce((a, t) => a + t.amount.amount_minor, 0) +
     creditPurchases;
 
-  const salesInWindow = saleLog.filter((s) => inWindow(s.at));
+  const salesInWindow = postedSales().filter((s) => inWindow(s.at));
   const salesTotal = salesInWindow.reduce((a, s) => a + s.total_minor, 0);
 
-  // Top products by units sold (SALE movements), revenue estimated at selling price.
-  const units = new Map<string, number>();
-  for (const p of listProducts(true)) {
-    const sold = productMovements(p.id)
-      .filter((m) => m.type === "SALE" && inWindow(m.occurred_at))
-      .reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
-    if (sold > 0) units.set(p.id, sold);
-  }
-  const topProducts = [...units.entries()]
-    .map(([pid, sold]) => {
-      const p = listProducts(true).find((x) => x.id === pid)!;
-      return { name: p.name, units: sold, revenue_estimate: formatMoney(sold * p.selling_price.amount_minor) };
+  // Top products by units sold, valued at the price each sale was ACTUALLY
+  // recorded at (MOCK parity with backend analytics.product_revenue). Using
+  // today's price meant raising a price silently rewrote closed periods.
+  const topProducts = listProducts(true)
+    .map((p) => {
+      const moves = productMovements(p.id).filter((m) => m.type === "SALE" && inWindow(m.occurred_at));
+      const sold = moves.reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+      let revenue = 0;
+      let exact = true;
+      for (const m of moves) {
+        const qty = Math.abs(m.quantity_delta);
+        if (m.unit_cost !== null) revenue += qty * m.unit_cost.amount_minor;
+        else {
+          revenue += qty * p.selling_price.amount_minor; // bundled total, no per-unit truth
+          exact = false;
+        }
+      }
+      return { name: p.name, units: sold, revenue_estimate: formatMoney(revenue), revenue_exact: exact };
     })
+    .filter((r) => r.units > 0)
     .sort((a, b) => b.revenue_estimate.amount_minor - a.revenue_estimate.amount_minor)
     .slice(0, 5);
 
@@ -1214,32 +1340,31 @@ export function computeWatch(): WatchResponse {
     });
   }
 
-  const overdue = debts.filter(
-    (d) => d.kind === "receivable" && d.amount_minor - d.settled_minor > 0 && d.due_date !== null && new Date(d.due_date).getTime() < now,
-  );
+  // MOCK parity with backend watch: age-based, because nothing sets a due date.
+  const overdue = debts.filter((d) => d.kind === "receivable" && debtIsOverdue(d));
   if (overdue.length > 0) {
     const total = overdue.reduce((a, d) => a + d.amount_minor - d.settled_minor, 0);
-    const oldestDays = Math.max(...overdue.map((d) => (now - new Date(d.due_date as string).getTime()) / 86400000));
+    const oldestDays = Math.max(...overdue.map(debtAgeDays));
     alerts.push({
       id: "watch-overdue", severity: oldestDays > 30 ? "critical" : "warning",
       what:
         overdue.length === 1
-          ? `1 customer payment is overdue — ${overdue[0].counterparty_name} owes ${formatMoney(total).display}.`
-          : `${overdue.length} customer payments are overdue — ${formatMoney(total).display} in total.`,
+          ? `${overdue[0].counterparty_name} has owed you ${formatMoney(total).display} for ${weeksWord(oldestDays)}.`
+          : `${overdue.length} customers owe you ${formatMoney(total).display}, the oldest for ${weeksWord(oldestDays)}.`,
       why: "Money owed to you is cash you cannot use, and old debts get harder to collect.",
       action: "Send a reminder, or agree a payment date you can follow up on.",
       target: "/money?tab=owed",
+      weight: total,
     });
   }
 
-  const payableOverdue = debts.filter(
-    (d) => d.kind === "payable" && d.amount_minor - d.settled_minor > 0 && d.due_date !== null && new Date(d.due_date).getTime() < now,
-  );
+  const payableOverdue = debts.filter((d) => d.kind === "payable" && debtIsOverdue(d));
   if (payableOverdue.length > 0) {
     const total = payableOverdue.reduce((a, d) => a + d.amount_minor - d.settled_minor, 0);
+    const oldestPayable = Math.max(...payableOverdue.map(debtAgeDays));
     alerts.push({
-      id: "watch-payable-due", severity: "warning",
-      what: `You owe suppliers ${formatMoney(total).display} past the agreed date.`,
+      id: "watch-payable-due", severity: "warning", weight: total,
+      what: `You have owed suppliers ${formatMoney(total).display} for ${weeksWord(oldestPayable)}.`,
       why: "Paying late can strain the supplier relationships your stock depends on.",
       action: "Settle what you can, or talk to the supplier about a new date.",
       target: "/money?tab=owe",
@@ -1250,10 +1375,10 @@ export function computeWatch(): WatchResponse {
   const prevStart = now - 2 * WINDOW_MS;
   const at = (iso: string) => new Date(iso).getTime();
 
-  const curSales = saleLog.filter((s) => at(s.at) >= curStart).reduce((a, s) => a + s.total_minor, 0);
-  const prevSales = saleLog.filter((s) => at(s.at) >= prevStart && at(s.at) < curStart).reduce((a, s) => a + s.total_minor, 0);
+  const curSales = postedSales().filter((s) => at(s.at) >= curStart).reduce((a, s) => a + s.total_minor, 0);
+  const prevSales = postedSales().filter((s) => at(s.at) >= prevStart && at(s.at) < curStart).reduce((a, s) => a + s.total_minor, 0);
   const salesPct = pctChange(curSales, prevSales);
-  const salesFell = salesPct !== null && salesPct <= -SALES_DOWN_WARN;
+  const salesFell = salesPct !== null && salesPct <= -SALES_DOWN_WARN && isMaterial(curSales, prevSales);
   if (salesFell && salesPct !== null) {
     alerts.push({
       id: "watch-sales-down", severity: salesPct <= -SALES_DOWN_CRIT ? "critical" : "warning",
@@ -1261,6 +1386,7 @@ export function computeWatch(): WatchResponse {
       why: "A falling week can mean missing stock, fewer customers, or a price problem.",
       action: "Check your top products and stock levels, and ask regular customers what changed.",
       target: "/insights",
+      weight: Math.max(0, prevSales - curSales),
     });
   }
 
@@ -1270,7 +1396,8 @@ export function computeWatch(): WatchResponse {
   const curExp = winSum("EXPENSE", curStart, now + 1);
   const prevExp = winSum("EXPENSE", prevStart, curStart);
   const expPct = pctChange(curExp, prevExp);
-  if (expPct !== null && expPct >= EXPENSES_UP_WARN) {
+  const expensesRose = expPct !== null && expPct >= EXPENSES_UP_WARN && isMaterial(curExp, prevExp);
+  if (expensesRose && expPct !== null) {
     const byCat = new Map<string, [number, number]>();
     txs
       .filter((t) => t.type === "EXPENSE" && at(t.occurred_at) >= prevStart)
@@ -1282,6 +1409,7 @@ export function computeWatch(): WatchResponse {
     const driver = [...byCat.entries()].sort((a, b) => (b[1][0] - b[1][1]) - (a[1][0] - a[1][1]))[0];
     alerts.push({
       id: "watch-expenses-up", severity: expPct >= EXPENSES_UP_CRIT ? "critical" : "warning",
+      weight: Math.max(0, curExp - prevExp),
       what: `Money out is ${expPct.toFixed(0)}% higher than your previous week (${formatMoney(curExp).display} vs ${formatMoney(prevExp).display}).`,
       why:
         driver && driver[1][0] > driver[1][1]
@@ -1296,15 +1424,18 @@ export function computeWatch(): WatchResponse {
   const prevIn = winSum("INCOME", prevStart, curStart);
   const curLeft = curIn - curExp;
   const prevLeft = prevIn - prevExp;
-  if (!salesFell && prevLeft > 0) {
+  // Costs rose AND less was kept is one story — the expenses alert names the
+  // driver, so the profit alert is suppressed rather than restating it.
+  if (!salesFell && !expensesRose && prevLeft > 0) {
     const leftPct = curLeft >= 0 ? pctChange(curLeft, prevLeft) : -100;
-    if (leftPct !== null && leftPct <= -PROFIT_DOWN_WARN) {
+    if (leftPct !== null && leftPct <= -PROFIT_DOWN_WARN && isMaterial(curLeft, prevLeft)) {
       alerts.push({
         id: "watch-profit-down", severity: "warning",
         what: `You kept ${Math.abs(leftPct).toFixed(0)}% less this week than last (${formatMoney(curLeft).display} vs ${formatMoney(prevLeft).display}).`,
         why: "Sales held up, but you kept less of them — costs are eating the difference.",
         action: "Compare this week's spending with last week's to see where the money went.",
         target: "/insights",
+        weight: Math.max(0, prevLeft - curLeft),
       });
     }
   }
@@ -1341,7 +1472,9 @@ export function computeWatch(): WatchResponse {
   }
 
   const order = { critical: 0, warning: 1, info: 2 } as const;
-  alerts.sort((a, b) => order[a.severity] - order[b.severity]);
+  // Severity picks the band; money at stake orders within it. Capped: Watch is
+  // a shortlist, not an inbox (MOCK parity with backend MAX_ALERTS).
+  alerts.sort((a, b) => order[a.severity] - order[b.severity] || (b.weight ?? 0) - (a.weight ?? 0));
   // Owner alert preferences (Menu → Alerts) — silence only, never invent.
   const prefOf = (id: string) =>
     id.startsWith("watch-out-of-stock") || id.startsWith("watch-low-stock") ? "stock"
@@ -1349,7 +1482,11 @@ export function computeWatch(): WatchResponse {
     : id.startsWith("watch-sales-down") || id.startsWith("watch-expenses-up") || id.startsWith("watch-profit-down") || id.startsWith("watch-unusual-cost") ? "money"
     : id.startsWith("watch-incomplete") ? "records"
     : null;
-  return { alerts: alerts.filter((a) => { const c = prefOf(a.id); return c === null || alertPrefs[c as keyof typeof alertPrefs]; }) };
+  return {
+    alerts: alerts
+      .filter((a) => { const c = prefOf(a.id); return c === null || alertPrefs[c as keyof typeof alertPrefs]; })
+      .slice(0, MAX_ALERTS),
+  };
 }
 
 const TREND_RANGES: Record<string, number> = { "7d": 7, "30d": 30, "3m": 91, "6m": 182, "1y": 365 };
@@ -1392,14 +1529,14 @@ export function computeTrends(range: string): TrendsResponse {
   const winSum = (type: Transaction["type"], from: number, to: number) =>
     txs.filter((t) => t.type === type && at(t.occurred_at) >= from && at(t.occurred_at) < to).reduce((a, t) => a + t.amount.amount_minor, 0);
 
-  const curSales = saleLog.filter((s) => at(s.at) >= curStart).reduce((a, s) => a + s.total_minor, 0);
-  const prevSales = saleLog.filter((s) => at(s.at) >= prevStart && at(s.at) < curStart).reduce((a, s) => a + s.total_minor, 0);
+  const curSales = postedSales().filter((s) => at(s.at) >= curStart).reduce((a, s) => a + s.total_minor, 0);
+  const prevSales = postedSales().filter((s) => at(s.at) >= prevStart && at(s.at) < curStart).reduce((a, s) => a + s.total_minor, 0);
   const curIn = winSum("INCOME", curStart, now + 1);
   const prevIn = winSum("INCOME", prevStart, curStart);
   const curOut = winSum("EXPENSE", curStart, now + 1);
   const prevOut = winSum("EXPENSE", prevStart, curStart);
-  const curUnits = movements.filter((m) => m.type === "SALE" && at(m.occurred_at) >= curStart).reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
-  const prevUnits = movements
+  const curUnits = postedMovements().filter((m) => m.type === "SALE" && at(m.occurred_at) >= curStart).reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+  const prevUnits = postedMovements()
     .filter((m) => m.type === "SALE" && at(m.occurred_at) >= prevStart && at(m.occurred_at) < curStart)
     .reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
 
@@ -1530,13 +1667,21 @@ export function checkout(
   const total = lines.reduce((a, l) => a + l.row.selling_minor * l.quantity, 0);
   if (total <= 0) return { error: "This sale could not be recorded." };
 
-  for (const l of lines) if (l.row.track) addMovement(l.row.id, "SALE", -l.quantity, l.row.selling_minor);
+  const checkoutSaleId = id("s");
+  for (const l of lines) {
+    if (l.row.track) {
+      addMovement(l.row.id, "SALE", -l.quantity, l.row.selling_minor, null, new Date().toISOString(), checkoutSaleId);
+    }
+  }
   const description = lines.map((l) => `${l.row.name} ×${l.quantity}`).join(", ").slice(0, 500);
   const { transaction: tx } = createTransaction(
     { type: "INCOME", amount_minor: total, description, source: "SALE", entry_method: "scan" },
     idempotencyKey ? `${idempotencyKey}:cash` : null,
   );
-  saleLog.push({ at: new Date().toISOString(), total_minor: total });
+  saleLog.push({
+    id: checkoutSaleId, at: new Date().toISOString(), total_minor: total,
+    status: "POSTED", cash_transaction_id: tx.id, receivable_id: null,
+  });
   const result: CheckoutResult = {
     transaction: tx,
     total: formatMoney(total),

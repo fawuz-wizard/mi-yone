@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..common.money import format_money
 from ..models import Debt, Party, Product, Sale, StockMovement, Transaction, utcnow
-from ..serializers import stock_of
+from ..serializers import debt_age_days, debt_is_overdue, stock_of
 from .finance import visible_query
 
 # Deterministic thresholds (documented, testable).
@@ -31,17 +31,49 @@ OVERDUE_CRIT_DAYS = 30
 
 WINDOW_DAYS = 7
 
+# A percentage means nothing on tiny amounts: Le 100 last week against Le 60
+# this week is a 40% "collapse" that used to render as a red critical alert on
+# a two-week-old business. An alert has to clear a real amount of money as well
+# as a real percentage — the SIZE of the change, not the size of the base, so a
+# small shop's genuine Le 10,000 → Le 50,000 jump still gets told.
+MIN_CHANGE_MINOR = 10_000_00
+
+# Business Watch is a shortlist, not an inbox. Everything still exists on the
+# screens it points at; what changes is how much competes for attention here.
+MAX_ALERTS = 5
+
+
+def _material(cur: int, prev: int) -> bool:
+    """Is the change worth an owner's attention in money, not just in percent?"""
+    return abs(cur - prev) >= MIN_CHANGE_MINOR
+
 
 def _pct_change(cur: int, prev: int) -> float | None:
-    """Percent change with the near-zero-base guard; None = insufficient data."""
+    """Percent change with the near-zero-base guard; None = insufficient data.
+    """
     if prev <= 0:
         return None
     pct = (cur - prev) / prev * 100
     return pct if abs(pct) <= PCT_GUARD else None
 
 
-def _alert(id_: str, severity: str, what: str, why: str, action: str, target: str) -> dict:
-    return {"id": id_, "severity": severity, "what": what, "why": why, "action": action, "target": target}
+def _weeks(days: int) -> str:
+    """Shop-floor duration: owners think in weeks and months, not in day counts."""
+    if days < 14:
+        return f"{days} days"
+    if days < 60:
+        return f"{days // 7} weeks"
+    return f"{days // 30} months"
+
+
+def _alert(id_: str, severity: str, what: str, why: str, action: str, target: str, weight: int = 0) -> dict:
+    """`weight` is the money at stake, in minor units. Severity decides the
+    band; weight decides the order inside it, so "Le 3,000,000 overdue" is not
+    ranked below "4 units left" purely because stock is computed first."""
+    return {
+        "id": id_, "severity": severity, "what": what, "why": why,
+        "action": action, "target": target, "weight": weight,
+    }
 
 
 # Alert-id prefix → owner-facing preference category (Menu → Alerts).
@@ -97,7 +129,7 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
     # a brand-new product with no movements yet is not an emergency
     moved = {
         m.product_id
-        for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business_id))
+        for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business_id, StockMovement.status == "POSTED"))
     }
     out = [(p, s) for p, s in out if p.id in moved]
     low = [(p, s) for p, s in levels if 0 < s <= p.low_stock_threshold]
@@ -129,44 +161,51 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
         )
 
     # ---- overdue customer debts --------------------------------------------
-    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id)))
-    overdue = [
-        d for d in debts
-        if d.kind == "receivable" and d.amount_minor - d.settled_minor > 0 and d.due_date is not None and d.due_date < now
-    ]
+    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.status == "POSTED")))
+    # Age-based (owner decision): nothing in MI YONE sets a due date, so these
+    # alerts checked a field that is always empty and could never fire. How
+    # long money has been owed is something we actually know about every
+    # record, and it needs nothing extra from the owner at sale time.
+    overdue = [d for d in debts if d.kind == "receivable" and debt_is_overdue(d)]
     if overdue:
         total = sum(d.amount_minor - d.settled_minor for d in overdue)
-        oldest_days = max((now - d.due_date).days for d in overdue if d.due_date is not None)
+        oldest_days = max(debt_age_days(d) for d in overdue)
         severity = "critical" if oldest_days > OVERDUE_CRIT_DAYS else "warning"
         if len(overdue) == 1:
             party = db.get(Party, overdue[0].counterparty_id)
             who = party.name if party else "A customer"
-            what = f"1 customer payment is overdue — {who} owes {format_money(total)['display']}."
+            what = (
+                f"{who} has owed you {format_money(total)['display']} for "
+                f"{_weeks(oldest_days)}."
+            )
         else:
-            what = f"{len(overdue)} customer payments are overdue — {format_money(total)['display']} in total."
+            what = (
+                f"{len(overdue)} customers owe you {format_money(total)['display']}, "
+                f"the oldest for {_weeks(oldest_days)}."
+            )
         alerts.append(
             _alert(
                 "watch-overdue", severity, what,
                 "Money owed to you is cash you cannot use, and old debts get harder to collect.",
                 "Send a reminder, or agree a payment date you can follow up on.",
                 "/money?tab=owed",
+                weight=total,
             )
         )
 
     # ---- supplier debts past due -------------------------------------------
-    payable_overdue = [
-        d for d in debts
-        if d.kind == "payable" and d.amount_minor - d.settled_minor > 0 and d.due_date is not None and d.due_date < now
-    ]
+    payable_overdue = [d for d in debts if d.kind == "payable" and debt_is_overdue(d)]
     if payable_overdue:
         total = sum(d.amount_minor - d.settled_minor for d in payable_overdue)
+        oldest_payable = max(debt_age_days(d) for d in payable_overdue)
         alerts.append(
             _alert(
                 "watch-payable-due", "warning",
-                f"You owe suppliers {format_money(total)['display']} past the agreed date.",
+                f"You have owed suppliers {format_money(total)['display']} for {_weeks(oldest_payable)}.",
                 "Paying late can strain the supplier relationships your stock depends on.",
                 "Settle what you can, or talk to the supplier about a new date.",
                 "/money?tab=owe",
+                weight=total,
             )
         )
 
@@ -174,11 +213,11 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
     window = timedelta(days=WINDOW_DAYS)
     cur_start, prev_start = now - window, now - 2 * window
 
-    sales_rows = list(db.scalars(select(Sale).where(Sale.business_id == business_id)))
+    sales_rows = list(db.scalars(select(Sale).where(Sale.business_id == business_id, Sale.status == "POSTED")))
     cur_sales = sum(s.total_minor for s in sales_rows if s.occurred_at >= cur_start)
     prev_sales = sum(s.total_minor for s in sales_rows if prev_start <= s.occurred_at < cur_start)
     sales_pct = _pct_change(cur_sales, prev_sales)
-    sales_fell = sales_pct is not None and sales_pct <= -SALES_DOWN_WARN
+    sales_fell = sales_pct is not None and sales_pct <= -SALES_DOWN_WARN and _material(cur_sales, prev_sales)
     if sales_fell and sales_pct is not None:
         severity = "critical" if sales_pct <= -SALES_DOWN_CRIT else "warning"
         alerts.append(
@@ -189,6 +228,7 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
                 "A falling week can mean missing stock, fewer customers, or a price problem.",
                 "Check your top products and stock levels, and ask regular customers what changed.",
                 "/insights",
+                weight=max(0, prev_sales - cur_sales),
             )
         )
 
@@ -196,7 +236,7 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
     cur_exp = sum(t.amount_minor for t in tx_rows if t.type == "EXPENSE" and t.occurred_at >= cur_start)
     prev_exp = sum(t.amount_minor for t in tx_rows if t.type == "EXPENSE" and prev_start <= t.occurred_at < cur_start)
     exp_pct = _pct_change(cur_exp, prev_exp)
-    if exp_pct is not None and exp_pct >= EXPENSES_UP_WARN:
+    if exp_pct is not None and exp_pct >= EXPENSES_UP_WARN and _material(cur_exp, prev_exp):
         severity = "critical" if exp_pct >= EXPENSES_UP_CRIT else "warning"
         # name the biggest driver so the alert is actionable, not just alarming
         by_cat: dict[str, list[int]] = {}
@@ -219,15 +259,19 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
                 why,
                 "Open the week's spending and check each large record is right and necessary.",
                 "/money?tab=out",
+                weight=max(0, cur_exp - prev_exp),
             )
         )
 
     cur_in = sum(t.amount_minor for t in tx_rows if t.type == "INCOME" and t.occurred_at >= cur_start)
     prev_in = sum(t.amount_minor for t in tx_rows if t.type == "INCOME" and prev_start <= t.occurred_at < cur_start)
     cur_left, prev_left = cur_in - cur_exp, prev_in - prev_exp
-    if not sales_fell and prev_left > 0:
+    # Suppressed when the expenses alert already told this story: costs rose,
+    # so less was kept. Two cards, two percentages, one fact was noise.
+    expenses_rose = any(a["id"] == "watch-expenses-up" for a in alerts)
+    if not sales_fell and not expenses_rose and prev_left > 0:
         left_pct = _pct_change(cur_left, prev_left) if cur_left >= 0 else -100.0
-        if left_pct is not None and left_pct <= -PROFIT_DOWN_WARN:
+        if left_pct is not None and left_pct <= -PROFIT_DOWN_WARN and _material(cur_left, prev_left):
             alerts.append(
                 _alert(
                     "watch-profit-down", "warning",
@@ -236,13 +280,14 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
                     "Sales held up, but you kept less of them — costs are eating the difference.",
                     "Compare this week's spending with last week's to see where the money went.",
                     "/insights",
+                    weight=max(0, prev_left - cur_left),
                 )
             )
 
     # ---- unusual purchase cost ---------------------------------------------
     recent_purchases = [
         m for m in db.scalars(
-            select(StockMovement).where(StockMovement.business_id == business_id, StockMovement.type == "PURCHASE")
+            select(StockMovement).where(StockMovement.business_id == business_id, StockMovement.status == "POSTED", StockMovement.type == "PURCHASE")
         )
         if m.occurred_at >= cur_start and m.unit_cost_minor is not None
     ]
@@ -284,5 +329,5 @@ def compute_watch(db: Session, business_id: str) -> list[dict]:
         )
 
     order = {"critical": 0, "warning": 1, "info": 2}
-    alerts.sort(key=lambda a: order[a["severity"]])
-    return alerts
+    alerts.sort(key=lambda a: (order[a["severity"]], -a.get("weight", 0)))
+    return alerts[:MAX_ALERTS]

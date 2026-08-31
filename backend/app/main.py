@@ -6,6 +6,7 @@ import uuid
 from fastapi import FastAPI, Request
 from sqlalchemy import text
 
+from .core.config import settings
 from .core.db import SessionLocal
 from .core.envelope import install_handlers, ok
 from .routers import analytics_r, auth, finance_r, integrations_r, parties_r, partner_r, settings_r, stock_r, trade_r
@@ -13,7 +14,15 @@ from .routers import analytics_r, auth, finance_r, integrations_r, parties_r, pa
 logger = logging.getLogger("miyone")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-app = FastAPI(title="MI YONE API", version="0.1.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
+# The interactive docs map every endpoint and schema. Useful in development,
+# an invitation outside it.
+_docs = settings.env == "dev"
+app = FastAPI(
+    title="MI YONE API",
+    version="0.1.0",
+    docs_url="/api/docs" if _docs else None,
+    openapi_url="/api/openapi.json" if _docs else None,
+)
 install_handlers(app)
 
 
@@ -54,6 +63,15 @@ _ADDITIVE_COLUMNS = (
     "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS alert_prefs VARCHAR(200)",
     "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'business'",
     "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS blocks_json TEXT",
+    # Whole-sale reversal: sales, debts and stock movements become reversible
+    # the same way transactions already were.
+    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'POSTED'",
+    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'POSTED'",
+    "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'POSTED'",
+    "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS sale_id VARCHAR(40)",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS debt_id VARCHAR(40)",
+    "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(80)",
+    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(80)",
     "UPDATE debts SET created_at = since WHERE created_at IS NULL",
     "UPDATE sales SET created_at = occurred_at WHERE created_at IS NULL",
     "UPDATE inventory_movements SET created_at = occurred_at WHERE created_at IS NULL",

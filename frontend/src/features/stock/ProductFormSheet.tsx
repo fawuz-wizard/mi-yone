@@ -19,13 +19,23 @@ import { useCreateProduct, useSuggestFromPhoto, useUpdateProduct, useUploadProdu
 const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 const MAX_BYTES = 5 * 1024 * 1024;
 
+// Packaging and unit words say nothing about WHAT a product is: "Rice bag" and
+// "Sugar bag" share "bag" and are not the same thing. Matching on one of these
+// produced confident, wrong duplicate warnings that named unrelated products.
+const GENERIC_NAME_WORDS = new Set([
+  "bag", "bags", "box", "boxes", "pack", "packs", "packet", "packets", "piece",
+  "pieces", "bottle", "bottles", "carton", "cartons", "tin", "tins", "sachet",
+  "sachets", "crate", "crates", "bar", "bars", "kilo", "kilos", "litre",
+  "litres", "liter", "liters", "cup", "cups", "small", "large", "big", "the",
+]);
+
 function nameTokens(name: string): Set<string> {
   return new Set(
     name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, " ")
       .split(/\s+/)
-      .filter((w) => w.length >= 3 && !/^\d/.test(w)),
+      .filter((w) => w.length >= 3 && !/^\d/.test(w) && !GENERIC_NAME_WORDS.has(w)),
   );
 }
 

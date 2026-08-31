@@ -37,7 +37,11 @@ def tx_json(t: Transaction) -> dict:
 
 def stock_of(db: Session, product_id: str) -> int:
     return int(
-        db.scalar(select(func.coalesce(func.sum(StockMovement.quantity_delta), 0)).where(StockMovement.product_id == product_id))
+        db.scalar(
+            select(func.coalesce(func.sum(StockMovement.quantity_delta), 0)).where(
+                StockMovement.product_id == product_id, StockMovement.status == "POSTED"
+            )
+        )
         or 0
     )
 
@@ -48,7 +52,12 @@ def recent_sale_prices(db: Session, product_id: str, limit: int = 3) -> list[int
     records are never rewritten by a price change today."""
     rows = db.scalars(
         select(StockMovement)
-        .where(StockMovement.product_id == product_id, StockMovement.type == "SALE", StockMovement.unit_cost_minor.isnot(None))
+        .where(
+            StockMovement.product_id == product_id,
+            StockMovement.type == "SALE",
+            StockMovement.status == "POSTED",
+            StockMovement.unit_cost_minor.isnot(None),
+        )
         .order_by(StockMovement.occurred_at.desc())
         .limit(10)
     )
@@ -95,15 +104,37 @@ def movement_json(m: StockMovement) -> dict:
         "quantity_delta": m.quantity_delta,
         "unit_cost": None if m.unit_cost_minor is None else format_money(m.unit_cost_minor),
         "occurred_at": iso(m.occurred_at),
+        "created_at": iso(m.created_at),
         "recorded_by": m.recorded_by,
         "note": m.note,
+        # A reversed movement stays in the history but no longer counts.
+        "status": m.status,
     }
+
+
+# How long money can sit owed before MI YONE calls it overdue. Debts have no
+# due date today (nothing in the product sets one), so age is what we actually
+# know — and an alert that works on every existing record beats a field the
+# owner has to remember to fill in during a ten-second sale.
+OVERDUE_AFTER_DAYS = 30
+
+
+def debt_age_days(d: Debt) -> int:
+    return max(0, (utcnow() - d.since).days)
+
+
+def debt_is_overdue(d: Debt) -> bool:
+    outstanding = d.amount_minor - d.settled_minor
+    if outstanding <= 0 or d.status != "POSTED":
+        return False
+    if d.due_date is not None:  # an explicit date always wins when one exists
+        return d.due_date < utcnow()
+    return debt_age_days(d) >= OVERDUE_AFTER_DAYS
 
 
 def debt_json(db: Session, d: Debt) -> dict:
     party = db.get(Party, d.counterparty_id)
     outstanding = d.amount_minor - d.settled_minor
-    overdue = d.due_date is not None and d.due_date < utcnow() and outstanding > 0
     return {
         "id": d.id,
         "counterparty_id": d.counterparty_id,
@@ -112,7 +143,11 @@ def debt_json(db: Session, d: Debt) -> dict:
         "outstanding": format_money(outstanding),
         "since": iso(d.since),
         "due_date": None if d.due_date is None else iso(d.due_date),
-        "overdue": overdue,
+        "overdue": debt_is_overdue(d),
+        "days_owed": debt_age_days(d),
+        # Where the debt came from, so the UI only offers "remove" where
+        # removing it is actually complete (a stock purchase is not).
+        "source": d.source,
         "status": "SETTLED" if outstanding == 0 else ("PARTIAL" if d.settled_minor > 0 else "OPEN"),
     }
 
@@ -120,7 +155,9 @@ def debt_json(db: Session, d: Debt) -> dict:
 def outstanding_for(db: Session, party_id: str) -> int:
     return int(
         db.scalar(
-            select(func.coalesce(func.sum(Debt.amount_minor - Debt.settled_minor), 0)).where(Debt.counterparty_id == party_id)
+            select(func.coalesce(func.sum(Debt.amount_minor - Debt.settled_minor), 0)).where(
+                Debt.counterparty_id == party_id, Debt.status == "POSTED"
+            )
         )
         or 0
     )

@@ -55,7 +55,7 @@ def _detail(db: Session, ctx: TenantContext, kind: str, party_id: str):
         raise ApiError(404, "NOT_FOUND", "Not found.")
     open_debts = [
         debt_json(db, d)
-        for d in db.scalars(select(Debt).where(Debt.counterparty_id == p.id, Debt.business_id == ctx.business.id))
+        for d in db.scalars(select(Debt).where(Debt.counterparty_id == p.id, Debt.business_id == ctx.business.id, Debt.status == "POSTED"))
         if d.amount_minor - d.settled_minor > 0
     ]
     history = list(

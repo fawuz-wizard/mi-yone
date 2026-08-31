@@ -109,3 +109,75 @@ def test_login_rate_limit_locks_repeated_failures():
     r = c.post("/api/v1/auth/login", json={"identifier": "victim@test.sl", "password": "wrong"})
     assert r.status_code == 429
     assert r.json()["error"]["code"] == "RATE_LIMITED"
+
+
+# ---------------------------------------------------------------------------
+# Hardening pass (owner brief, P0-6)
+# ---------------------------------------------------------------------------
+
+def test_login_does_not_leak_which_emails_exist(client_factory=None):
+    """Same message AND comparable work for a real and a made-up account."""
+    import time
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    c = TestClient(app)
+
+    def attempt(identifier: str) -> tuple[int, float]:
+        start = time.monotonic()
+        r = c.post("/api/v1/auth/login", json={"identifier": identifier, "password": "wrong-password-here"})
+        return r.status_code, time.monotonic() - start
+
+    real_status, real_time = attempt("owner@test.sl")
+    fake_status, fake_time = attempt("nobody-at-all@test.sl")
+    assert real_status == fake_status == 401
+    # The old code short-circuited on a missing user, so the gap was orders of
+    # magnitude. Both now pay for one password hash.
+    slower, faster = max(real_time, fake_time), min(real_time, fake_time)
+    assert slower < faster * 5 + 0.05, f"timing gap leaks account existence: {real_time:.4f} vs {fake_time:.4f}"
+
+
+def test_registration_is_rate_limited():
+    """Unauthenticated + argon2 = the cheapest way to exhaust the server."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    c = TestClient(app)
+    codes = [
+        c.post("/api/v1/auth/register", json={
+            "name": "Flood", "identifier": f"flood{i}@test.sl",
+            "password": "a-long-enough-password", "business_name": "Flood Shop",
+        }).status_code
+        for i in range(7)
+    ]
+    assert 429 in codes, "registration must be throttled"
+
+
+def test_password_change_attempts_are_throttled(client):
+    codes = [
+        client.post("/api/v1/auth/change-password", json={
+            "current_password": "wrong-one", "new_password": "another-long-password",
+        }).status_code
+        for _ in range(7)
+    ]
+    assert 429 in codes
+
+
+def test_the_rate_limiter_does_not_grow_without_bound():
+    """Keys include text the attacker types at the sign-in form."""
+    from app.core import ratelimit
+
+    ratelimit.clear_all()
+    for i in range(ratelimit.MAX_KEYS + 500):
+        ratelimit.record(f"login-id:{i}@spam.test")
+    assert len(ratelimit._events) <= ratelimit.MAX_KEYS
+    ratelimit.clear_all()
+
+
+def test_an_expired_window_is_forgotten_rather_than_kept():
+    from app.core import ratelimit
+
+    ratelimit.clear_all()
+    ratelimit.record("login-id:someone@test.sl")
+    assert ratelimit.allow("login-id:someone@test.sl", 5, 0.0)  # window already past
+    assert "login-id:someone@test.sl" not in ratelimit._events

@@ -40,6 +40,13 @@ export function mapApiError(status: number, body: ApiErrorBody | undefined): Dom
       return new DomainError("conflict", "error.generic", rid);
     default:
       if (status === 401 || status === 403) return new DomainError("auth", "error.auth", rid);
+      // 502/503/504 with no envelope is what a weak link actually looks like:
+      // a gateway answered, the app did not. Treating it as a server rejection
+      // meant the record was not held for retry and the owner was told
+      // "something went wrong" when the truth was "no connection".
+      if (status === 502 || status === 503 || status === 504 || status === 0) {
+        return new DomainError("network", "error.network", rid);
+      }
       return new DomainError("server", "error.generic", rid);
   }
 }

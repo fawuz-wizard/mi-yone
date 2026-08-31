@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, Header, File, UploadFile
 from fastapi.responses import Response as RawResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -131,11 +131,15 @@ def update_product(product_id: str, body: UpdateProductInput, ctx: TenantContext
 
 
 @router.post("/{product_id}/stock")
-def add_stock(product_id: str, body: AddStockInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
+def add_stock(
+    product_id: str, body: AddStockInput,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=80),
+    ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db),
+):
     p, m = inventory.add_stock(
         db, ctx.business.id, ctx.user.full_name, product_id,
         quantity=body.quantity, unit_cost_minor=body.unit_cost_minor, paid=body.paid, supplier_id=body.supplier_id,
-        entry_method=body.entry_method,
+        entry_method=body.entry_method, idempotency_key=idempotency_key,
     )
     return ok({"product": product_json(db, p), "movement": movement_json(m)}, status_code=201)
 

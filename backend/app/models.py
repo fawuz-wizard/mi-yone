@@ -85,6 +85,9 @@ class Transaction(Base):
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
     type: Mapped[str] = mapped_column(String(8))  # INCOME/EXPENSE
     status: Mapped[str] = mapped_column(String(10), default="POSTED")  # POSTED/REVERSED
+    # For SETTLEMENT rows: the debt this payment was applied to, so reversing
+    # the payment also puts the amount back on the debt.
+    debt_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
     amount_minor: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(String(3), default="SLE")
     category_name: Mapped[str] = mapped_column(String(80))
@@ -139,6 +142,15 @@ class StockMovement(Base):
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
     product_id: Mapped[str] = mapped_column(ForeignKey("products.id"), index=True)
     type: Mapped[str] = mapped_column(String(12))  # PURCHASE/SALE/ADJUSTMENT/DAMAGE
+    # Movements are immutable like every other record: a correction REVERSES
+    # the row rather than editing or deleting it. Reversed movements stay in
+    # the history and stop counting toward stock and analytics.
+    status: Mapped[str] = mapped_column(String(10), default="POSTED")  # POSTED/REVERSED
+    # The sale this movement belongs to, so reversing a sale can put the stock
+    # back without guessing which movement it was.
+    sale_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    # A stock purchase retried on a weak connection must not buy twice.
+    idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     quantity_delta: Mapped[int] = mapped_column(Integer)
     unit_cost_minor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
@@ -173,6 +185,8 @@ class Debt(Base):
     since: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     due_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source: Mapped[str] = mapped_column(String(10), default="MANUAL")  # SALE/MANUAL/PURCHASE
+    status: Mapped[str] = mapped_column(String(10), default="POSTED")  # POSTED/REVERSED
+    idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)  # when ENTERED (vs since)
     entry_method: Mapped[str] = mapped_column(String(8), default="manual")  # manual/text/voice/scan
     __table_args__ = (CheckConstraint("settled_minor <= amount_minor", name="ck_debt_no_oversettle"),)
@@ -185,6 +199,7 @@ class Sale(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
     total_minor: Mapped[int] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(10), default="POSTED")  # POSTED/REVERSED
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)  # when ENTERED (vs occurred)
     idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)

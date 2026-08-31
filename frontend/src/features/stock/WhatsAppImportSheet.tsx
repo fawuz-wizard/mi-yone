@@ -11,10 +11,22 @@ import type { WaImport, WaItem, WaStatusResponse } from "@/shared/api/types";
 import { BUSINESS_ID } from "@/shared/api/session";
 import { BottomSheet } from "@/shared/design-system/BottomSheet";
 import { Button } from "@/shared/design-system/Button";
+import { ConfirmDialog } from "@/shared/design-system/ConfirmDialog";
 import { useToast } from "@/shared/design-system/Toast";
 import { useT } from "@/shared/i18n";
 
 const WA = `/businesses/${BUSINESS_ID}/integrations/whatsapp`;
+
+// Disconnecting keeps the import history and every product already brought in;
+// reconnecting later reactivates the same connection.
+function useWaDisconnect() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      api<Record<string, never>>(`/businesses/${BUSINESS_ID}/integrations/whatsapp/connection`, { method: "DELETE" }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["wa"] }),
+  });
+}
 
 function useWaStatus(enabled: boolean) {
   return useQuery({ queryKey: ["wa"], queryFn: () => api<WaStatusResponse>(WA), enabled });
@@ -25,7 +37,9 @@ export function WhatsAppImportSheet({ open, onClose }: { open: boolean; onClose:
   const toast = useToast();
   const qc = useQueryClient();
   const status = useWaStatus(open);
+  const disconnect = useWaDisconnect();
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ["wa"] });
   const refreshProducts = () => {
@@ -81,6 +95,19 @@ export function WhatsAppImportSheet({ open, onClose }: { open: boolean; onClose:
               </Button>
             </div>
 
+            {/* The Menu row promises "connect, import or disconnect" — this is
+                the disconnect it promised. */}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setConfirmingDisconnect(true)}
+                data-testid="wa-disconnect"
+                className="min-h-[40px] text-sm font-semibold text-danger underline"
+              >
+                {t("wa.disconnect")}
+              </button>
+            </div>
+
             {imp?.status === "FAILED" ? (
               <div role="alert" className="rounded-card bg-danger-fill p-3">
                 <p className="text-sm font-semibold text-danger">{t("wa.failedTitle")}</p>
@@ -115,6 +142,23 @@ export function WhatsAppImportSheet({ open, onClose }: { open: boolean; onClose:
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmingDisconnect}
+        title={t("wa.disconnectConfirmTitle")}
+        body={t("wa.disconnectConfirmBody")}
+        confirmLabel={t("wa.disconnect")}
+        cancelLabel={t("common.cancel")}
+        destructive
+        onConfirm={() =>
+          disconnect.mutate(undefined, {
+            onSuccess: () => {
+              setConfirmingDisconnect(false);
+              toast.show({ message: t("wa.disconnected") });
+            },
+          })
+        }
+        onCancel={() => setConfirmingDisconnect(false)}
+      />
     </BottomSheet>
   );
 }

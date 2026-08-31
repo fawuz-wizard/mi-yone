@@ -33,3 +33,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# A deployment that sets MIYONE_ENV but forgets MIYONE_COOKIE_SECURE would ship
+# session cookies that travel in the clear. Outside dev, secure is the floor —
+# the environment can only ever turn it ON, never off.
+if settings.env != "dev":
+    settings.cookie_secure = True

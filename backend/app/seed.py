@@ -113,7 +113,7 @@ def run() -> None:
             db.add(Product(id=pid, business_id=BUSINESS_ID, name=name, unit=unit, selling_minor=sell, cost_minor=cost, low_stock_threshold=threshold))
 
         db.flush()
-        movement(db, "p-101", "PURCHASE", 12, 70_000_00, days_ago(20, 8))
+        movement(db, "p-101", "PURCHASE", 60, 70_000_00, days_ago(20, 8))
         movement(db, "p-102", "PURCHASE", 5, 24_000_00, days_ago(15, 8))
         movement(db, "p-102", "SALE", -2, None, days_ago(3, 12))
         movement(db, "p-103", "PURCHASE", 40, 3_600_00, days_ago(10, 8))

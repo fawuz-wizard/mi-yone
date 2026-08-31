@@ -12,6 +12,22 @@ export function useDebts(kind: "receivable" | "payable", enabled: boolean) {
   });
 }
 
+export function useRemoveDebt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (debtId: string) =>
+      api<{ reversed: boolean }>(`/businesses/${BUSINESS_ID}/debts/${debtId}/reverse`, { method: "POST", body: {} }),
+    onSuccess: () => {
+      // A credit sale's debt is the only door to that sale, so removing it can
+      // change stock and the sales count too — refresh everything that reads
+      // from the ledger rather than guessing what moved.
+      for (const key of ["debts", "transactions", "dashboard", "watch", "products", "parties", "reports"]) {
+        void qc.invalidateQueries({ queryKey: [key] });
+      }
+    },
+  });
+}
+
 export function useSettleDebt() {
   const qc = useQueryClient();
   return useMutation({

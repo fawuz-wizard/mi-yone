@@ -127,8 +127,57 @@ def test_profit_squeeze_only_when_sales_held(client):
     _tx(client, "EXPENSE", 13_900_00, 9)  # prev out 23,900 → prev left 76,100
     _tx(client, "EXPENSE", 60_000_00, 2)  # cur left 40,000 → −47%
     ids = [a["id"] for a in _watch(client)]
-    assert "watch-profit-down" in ids
     assert "watch-sales-down" not in ids
+    # Costs rose AND less was kept is one story, not two. The expenses alert
+    # wins because it names the driver; the profit alert is suppressed rather
+    # than restating the same fact with a different percentage.
+    assert "watch-expenses-up" in ids
+    assert "watch-profit-down" not in ids
+
+
+def test_profit_down_still_fires_when_expenses_did_not_rise(client):
+    """Suppression must not silence the case it was never about: income fell
+    while costs held steady."""
+    _sale_row(100_000_00, 10)
+    _sale_row(100_000_00, 2)
+    _tx(client, "INCOME", 200_000_00, 10)
+    _tx(client, "INCOME", 100_000_00, 2)  # income halved
+    _tx(client, "EXPENSE", 20_000_00, 9)
+    _tx(client, "EXPENSE", 20_000_00, 2)  # costs flat
+    ids = [a["id"] for a in _watch(client)]
+    assert "watch-profit-down" in ids
+    assert "watch-expenses-up" not in ids
+
+
+def test_tiny_amounts_do_not_raise_alarms(client):
+    """Le 100 against Le 60 is a 40% 'collapse' and complete noise."""
+    _sale_row(100_00, 10)
+    _sale_row(60_00, 2)
+    _tx(client, "EXPENSE", 500_00, 9)
+    _tx(client, "EXPENSE", 1_100_00, 2)  # +120% on Le 500
+    ids = [a["id"] for a in _watch(client)]
+    assert "watch-sales-down" not in ids
+    assert "watch-expenses-up" not in ids
+
+
+def test_watch_is_a_shortlist_ordered_by_money_at_stake(client):
+    """A low-stock warning must not outrank a large overdue debt just because
+    stock happens to be computed first."""
+    _create_product(client, initial=4)  # low stock warning, small money
+    with SessionLocal() as db:
+        db.add(Party(id="c-big", business_id="b-1", kind="customer", name="Big Debtor"))
+        db.flush()
+        db.add(Debt(id="r-big", business_id="b-1", kind="receivable", counterparty_id="c-big",
+                    amount_minor=3_000_000_00, settled_minor=0, since=utcnow() - timedelta(days=45),
+                    due_date=None, source="SALE"))
+        db.commit()
+    alerts = _watch(client)
+    ids = [a["id"] for a in alerts]
+    assert len(alerts) <= 5, "Business Watch is a shortlist, not an inbox"
+    assert ids[0] == "watch-overdue", ids
+    assert ids.index("watch-overdue") < ids.index("watch-low-stock")
+    # Money at stake is carried on the alert so the ordering is inspectable.
+    assert alerts[0]["weight"] == 3_000_000_00
 
 
 # ---------------------------------------------------------------------------
@@ -170,7 +219,27 @@ def test_overdue_debt_severity_scales_with_age(client):
         db.commit()
     alerts = {a["id"]: a for a in _watch(client)}
     assert alerts["watch-overdue"]["severity"] == "critical"  # 45 days > 30
-    assert "2 customer payments are overdue" in alerts["watch-overdue"]["what"]
+    assert "2 customers owe you" in alerts["watch-overdue"]["what"]
+
+
+def test_overdue_alert_fires_on_age_when_no_due_date_was_ever_set(client):
+    """Nothing in MI YONE sets a due date, so the old due-date-only rule meant
+    these alerts could never fire for a real business. Age is what we know."""
+    with SessionLocal() as db:
+        db.add(Party(id="c-age", business_id="b-1", kind="customer", name="Aminata"))
+        db.flush()
+        db.add(Debt(id="r-age", business_id="b-1", kind="receivable", counterparty_id="c-age",
+                    amount_minor=45_000_00, settled_minor=0, since=utcnow() - timedelta(days=40),
+                    due_date=None, source="SALE"))
+        db.add(Debt(id="r-fresh", business_id="b-1", kind="receivable", counterparty_id="c-age",
+                    amount_minor=10_000_00, settled_minor=0, since=utcnow() - timedelta(days=2),
+                    due_date=None, source="SALE"))
+        db.commit()
+    alerts = {a["id"]: a for a in _watch(client)}
+    what = alerts["watch-overdue"]["what"]
+    assert "Aminata" in what and "weeks" in what
+    # The two-day-old debt is not chased; only the aged one counts.
+    assert "45,000" in what and "55,000" not in what
 
 
 def test_unusual_purchase_cost_flagged_once(client):

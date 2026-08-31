@@ -279,11 +279,15 @@ function topProducts(): string[] {
   if (r.sales.top_products.length === 0) {
     return ["No product sales are recorded this month yet, so I can't rank products. Sales recorded without picking a product don't count toward product rankings."];
   }
-  const lines = r.sales.top_products.slice(0, 3).map((p) => `${p.name} (${p.units} sold, about ${p.revenue_estimate.display})`).join(", ");
-  return [
-    `From your records this month, your top products are: ${lines}.`,
-    "Product revenue is estimated from units sold at each product's current price — individual sale prices can differ.",
-  ];
+  const tops = r.sales.top_products.slice(0, 3);
+  const lines = tops.map((p) => `${p.name} (${p.units} sold, ${p.revenue_estimate.display})`).join(", ");
+  const facts = [`From your records this month, your top products are: ${lines}.`];
+  if (tops.some((p) => p.revenue_exact === false)) {
+    facts.push(
+      "Some of those sales were recorded as a bundled total with no per-item price, so part of the figure uses the current price.",
+    );
+  }
+  return facts;
 }
 
 function productFacts(p: Product): string[] {
@@ -291,16 +295,28 @@ function productFacts(p: Product): string[] {
   const monthStart = now - 30 * 86400000;
   const at = (iso: string) => new Date(iso).getTime();
   const moves = productMovements(p.id);
-  const sold = moves.filter((m) => m.type === "SALE" && at(m.occurred_at) >= monthStart).reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
+  const saleMoves = moves.filter((m) => m.type === "SALE" && at(m.occurred_at) >= monthStart);
+  const sold = saleMoves.reduce((a, m) => a + Math.abs(m.quantity_delta), 0);
   const facts: string[] = [];
   const plural = (n: number) => (n !== 1 && !p.unit.endsWith("s") ? "s" : "");
   if (sold === 0) {
     facts.push(`I don't have any recorded sales of ${p.name} in the last 30 days.`);
   } else {
-    const est = sold * p.selling_price.amount_minor;
-    facts.push(
-      `From your records: ${sold} ${p.unit}${plural(sold)} of ${p.name} sold in the last 30 days — roughly ${money(est)} at your current price of ${p.selling_price.display} (an estimate; individual sale prices can differ).`,
-    );
+    // The price each sale was ACTUALLY made at (MOCK parity with backend
+    // analytics.product_revenue) — today's price never rewrites history.
+    let revenue = 0;
+    let exact = true;
+    for (const m of saleMoves) {
+      const qty = Math.abs(m.quantity_delta);
+      if (m.unit_cost !== null) revenue += qty * m.unit_cost.amount_minor;
+      else {
+        revenue += qty * p.selling_price.amount_minor;
+        exact = false;
+      }
+    }
+    let line = `From your records: ${sold} ${p.unit}${plural(sold)} of ${p.name} sold in the last 30 days, bringing in ${money(revenue)}.`;
+    if (!exact) line += " Some of those were recorded as a bundled total, so part of that figure uses the current price.";
+    facts.push(line);
   }
   const prevSold = moves
     .filter((m) => m.type === "SALE" && at(m.occurred_at) >= now - 60 * 86400000 && at(m.occurred_at) < monthStart)

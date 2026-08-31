@@ -66,6 +66,16 @@ def _start_session(db: Session, response, user: User) -> None:
     )
 
 
+# A hash of a value nobody can log in with, used to spend the same argon2 time
+# on a missing account as on a real one.
+_DUMMY_HASH = hash_password("miyone-timing-guard-not-a-real-password")
+
+
+def _burn_password_time(password: str) -> bool:
+    verify_password(_DUMMY_HASH, password)
+    return False
+
+
 @router.post("/login")
 def login(body: LoginInput, request: Request, db: Session = Depends(get_db)):
     identifier = body.identifier.strip().lower()
@@ -78,8 +88,12 @@ def login(body: LoginInput, request: Request, db: Session = Depends(get_db)):
         raise ApiError(429, "RATE_LIMITED", "Too many attempts. Please wait a moment and try again.")
     ratelimit.record(f"login-ip:{ip}")
     user = db.scalar(select(User).where(User.email == identifier))
-    # Uniform failure — no user enumeration (Phase 2 §17).
-    if user is None or not verify_password(user.password_hash, body.password):
+    # Uniform failure AND uniform timing — no user enumeration (Phase 2 §17).
+    # Short-circuiting on a missing account returned in microseconds while a
+    # real account paid argon2's full cost, so the gap told an attacker which
+    # emails exist despite the identical message. Hash either way.
+    ok_password = verify_password(user.password_hash, body.password) if user is not None else _burn_password_time(body.password)
+    if user is None or not ok_password:
         ratelimit.record(f"login-id:{identifier}")
         audit(db, None, identifier or "?", "auth.login_failed")
         raise ApiError(401, "AUTH_INVALID", "We couldn't sign you in. Check your details and try again.")
@@ -94,7 +108,14 @@ def login(body: LoginInput, request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/register")
-def register(body: RegisterInput, db: Session = Depends(get_db)):
+def register(body: RegisterInput, request: Request, db: Session = Depends(get_db)):
+    # Registration is unauthenticated and hashes a password with argon2id
+    # (deliberately expensive). Without a limit, a loop here is the cheapest
+    # way to exhaust the server during testing.
+    ip = request.client.host if request.client else "?"
+    if not ratelimit.allow(f"register-ip:{ip}", 5, 600):
+        raise ApiError(429, "RATE_LIMITED", "Too many attempts. Please wait a moment and try again.")
+    ratelimit.record(f"register-ip:{ip}")
     identifier = body.identifier.strip().lower()
     if not body.name.strip() or not identifier or len(body.password) < 10:
         raise ApiError(422, "VALIDATION_ERROR", "Some of the information is invalid.")
@@ -178,8 +199,13 @@ def change_password(
     body: ChangePasswordInput, request: Request,
     user: User = Depends(current_user), db: Session = Depends(get_db),
 ):
+    # Guessing the current password from a stolen session is throttled too.
+    if not ratelimit.allow(f"pwchange:{user.id}", 5, 300):
+        raise ApiError(429, "RATE_LIMITED", "Too many attempts. Please wait a moment and try again.")
     if not verify_password(user.password_hash, body.current_password):
+        ratelimit.record(f"pwchange:{user.id}")
         raise ApiError(422, "VALIDATION_ERROR", "The current password is not correct.")
+    ratelimit.reset(f"pwchange:{user.id}")
     user.password_hash = hash_password(body.new_password)
     # Changing the password signs out every OTHER device — the standard
     # protective move; this session continues.

@@ -239,27 +239,36 @@ def _top_products(db: Session, business: Business) -> list[str]:
     tops = r["sales"]["top_products"]
     if not tops:
         return ["No product sales are recorded this month yet, so I can't rank products. Sales recorded without picking a product don't count toward product rankings."]
-    lines = ", ".join(f"{p['name']} ({p['units']} sold, about {p['revenue_estimate']['display']})" for p in tops[:3])
-    return [
-        f"From your records this month, your top products are: {lines}.",
-        "Product revenue is estimated from units sold at each product's current price — individual sale prices can differ.",
-    ]
+    lines = ", ".join(f"{p['name']} ({p['units']} sold, {p['revenue_estimate']['display']})" for p in tops[:3])
+    facts = [f"From your records this month, your top products are: {lines}."]
+    if any(not p.get("revenue_exact", True) for p in tops[:3]):
+        facts.append(
+            "Some of those sales were recorded as a bundled total with no per-item price, "
+            "so part of the figure uses the current price."
+        )
+    return facts
 
 
 def _product(db: Session, business: Business, product: Product) -> list[str]:
     now = utcnow()
     month_start = now - timedelta(days=30)
     moves = [
-        m for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business.id, StockMovement.product_id == product.id))
+        m for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business.id, StockMovement.product_id == product.id, StockMovement.status == "POSTED"))
     ]
-    sold = sum(abs(m.quantity_delta) for m in moves if m.type == "SALE" and m.occurred_at >= month_start)
+    sale_moves = [m for m in moves if m.type == "SALE" and m.occurred_at >= month_start]
+    sold = sum(abs(m.quantity_delta) for m in sale_moves)
     stock = stock_of(db, product.id)
     facts = []
     if sold == 0:
         facts.append(f"I don't have any recorded sales of {product.name} in the last 30 days.")
     else:
-        est = sold * product.selling_minor
-        facts.append(f"From your records: {sold} {product.unit}{'s' if sold != 1 and not product.unit.endswith('s') else ''} of {product.name} sold in the last 30 days — roughly {_money(est)} at your current price of {_money(product.selling_minor)} (an estimate; individual sale prices can differ).")
+        # The price each sale was actually made at, not today's price.
+        revenue, exact = analytics.product_revenue(sale_moves, product.selling_minor)
+        unit_word = f"{product.unit}{'s' if sold != 1 and not product.unit.endswith('s') else ''}"
+        line = f"From your records: {sold} {unit_word} of {product.name} sold in the last 30 days, bringing in {_money(revenue)}."
+        if not exact:
+            line += " Some of those were recorded as a bundled total, so part of that figure uses the current price."
+        facts.append(line)
     prev_sold = sum(abs(m.quantity_delta) for m in moves if m.type == "SALE" and now - timedelta(days=60) <= m.occurred_at < month_start)
     if prev_sold > 0:
         pct = _pct(sold, prev_sold)
@@ -276,7 +285,7 @@ def _product(db: Session, business: Business, product: Product) -> list[str]:
 def _stock_why(db: Session, business: Business) -> list[str]:
     now = utcnow()
     start = now - timedelta(days=30)
-    moves = [m for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business.id)) if m.occurred_at >= start]
+    moves = [m for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business.id, StockMovement.status == "POSTED")) if m.occurred_at >= start]
     outs: dict[str, int] = {}
     damaged: dict[str, int] = {}
     for m in moves:
@@ -297,7 +306,7 @@ def _stock_why(db: Session, business: Business) -> list[str]:
 
 
 def _debts(db: Session, business: Business) -> list[str]:
-    debts = [d for d in db.scalars(select(Debt).where(Debt.business_id == business.id, Debt.kind == "receivable")) if d.amount_minor - d.settled_minor > 0]
+    debts = [d for d in db.scalars(select(Debt).where(Debt.business_id == business.id, Debt.status == "POSTED", Debt.kind == "receivable")) if d.amount_minor - d.settled_minor > 0]
     if not debts:
         return ["No customers owe you money right now, according to your records."]
     total = sum(d.amount_minor - d.settled_minor for d in debts)
@@ -473,7 +482,8 @@ def _decision_answer(db: Session, business: Business, question: str, normalized:
         low = stock <= product.low_stock_threshold
         now = utcnow()
         moves = list(db.scalars(select(StockMovement).where(
-            StockMovement.business_id == business.id, StockMovement.product_id == product.id)))
+            StockMovement.business_id == business.id, StockMovement.product_id == product.id,
+            StockMovement.status == "POSTED")))
         sold = sum(abs(m.quantity_delta) for m in moves if m.type == "SALE" and m.occurred_at >= now - timedelta(days=30))
         prev = sum(abs(m.quantity_delta) for m in moves if m.type == "SALE" and now - timedelta(days=60) <= m.occurred_at < now - timedelta(days=30))
         if low and sold > 0:

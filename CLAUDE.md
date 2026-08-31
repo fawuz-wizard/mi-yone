@@ -185,7 +185,48 @@ mode toggle, per-block cards (consecutive same-lane blocks group into one card
 with one label), a sources block with dates, and voice input via the new
 shared/speech.ts (extracted from capture — features still never import each
 other). Only the RECORDS lane is ever phrased by the AI provider.
-74 unit + 93 Playwright E2E green (vs mock AND real backend); 116 backend tests.
+P0 RELIABILITY HARDENING (owner brief — feature freeze, stabilise what exists):
+1. WHOLE-SALE REVERSAL. Sale/Debt/StockMovement gained status (POSTED/REVERSED)
+   like Transaction always had; StockMovement gained sale_id and Transaction
+   gained debt_id. trade.reverse_sale reverses cash + stock + receivable + any
+   payments made against it; reversing a SETTLEMENT puts the amount back on the
+   debt; trade.reverse_debt is the door for credit sales (no cash row exists)
+   and refuses PURCHASE payables rather than half-removing a stock purchase.
+   EVERY aggregate now filters status == POSTED (analytics, watch, evidence,
+   serializers, routers) — inventory.posted_movements is the single stock rule.
+2. HISTORICAL REVENUE. analytics.product_revenue values units at the price
+   RECORDED on each sale movement, never today's price; top_products carries
+   revenue_exact (false = a bundled total had no per-unit price). A price change
+   can no longer rewrite a closed period or reorder "top products".
+3. STOCK VALIDATION on create_sale (checkout already had it) — stock cannot go
+   negative on either sale path.
+4. AMBIGUOUS TOTALS. "Sold 3 bags rice 350" now BLOCKS with "Le 1,050 each or
+   Le 350 altogether?" instead of silently recording a third of the money.
+5. BLOCKING ISSUES ARE ENFORCED: CaptureSheet tracks the interpretation's block
+   and disables Save until the owner answers (hasBlockingIssues was previously
+   exported, tested, and called by no UI).
+6. SECURITY: the in-repo MOCK API (no auth, no tenant isolation) is now OPT-IN
+   via MIYONE_MOCK_API=on — a build with neither that nor MIYONE_BACKEND_URL
+   REFUSES TO START; login burns a dummy argon2 hash on a missing account (no
+   timing enumeration); /register and /change-password are rate-limited; the
+   limiter is bounded (MAX_KEYS + expired-window eviction); cookie_secure is
+   forced on outside dev; /api/docs off outside dev.
+7. CSV: exact money (":g" wrote Le 1,234,567.89 as 1.23457e+06) + formula
+   injection neutralised (=,+,-,@ prefixed).
+8. CONSISTENCY: Money totals respect the search filter and keep cents; the
+   WhatsApp disconnect button is finally wired (endpoint existed, no caller);
+   Watch alerts carry `weight` (money at stake) and sort by it within a severity
+   band, are capped at MAX_ALERTS, need a material change (MIN_CHANGE_MINOR) not
+   just a percentage, and profit-down is suppressed when expenses-up already told
+   the story; overdue debts are AGE-based (nothing ever set a due_date, so both
+   debt alerts were unreachable); duplicate-name matching ignores generic
+   packaging words ("Rice bag" no longer matches "Sugar bag").
+9. OFFLINE (honest interim; durable queue is the next milestone): every request
+   has an AbortController timeout, 502/503/504 is classified as network not
+   server, purchases and manual debts finally carry idempotency keys, the queue
+   retries on a timer as well as the `online` event, pending items show their
+   amount, and the copy no longer promises durability it does not have.
+78 unit + 96 Playwright E2E green (vs mock AND real backend); 136 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

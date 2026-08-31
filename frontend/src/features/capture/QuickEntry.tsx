@@ -337,6 +337,9 @@ function PurchaseCard({
   const [paid, setPaid] = useState(result.paidSupplier);
   const [supplierId, setSupplierId] = useState<string | null>(result.supplierId);
   const [errorId, setErrorId] = useState<string | null>(null);
+  // Generated when this confirmation OPENS and reused on every retry, so a
+  // lost response on a weak connection cannot buy the stock twice (rule 7).
+  const idempotencyKeyRef = useRef(crypto.randomUUID());
 
   const qty = /^\d+$/.test(qtyStr) ? Number(qtyStr) : null;
   const costWhole = /^\d+(\.\d{1,2})?$/.test(costStr) ? Number(costStr) : null;
@@ -350,6 +353,7 @@ function PurchaseCard({
       await record.mutateAsync({
         productId,
         input: { quantity: qty, unit_cost_minor: Math.round(costWhole * 100), paid, supplier_id: paid ? undefined : (supplierId ?? undefined), entry_method: result.origin ?? "text" },
+        idempotencyKey: idempotencyKeyRef.current,
       });
       const name = products.find((p) => p.id === productId)?.name ?? "";
       onRecorded(t("stock.addedToast", { qty: String(qty), name }));
@@ -455,6 +459,7 @@ function DebtRecordCard({
 }) {
   const t = useT();
   const record = useRecordDebt();
+  const idempotencyKeyRef = useRef(crypto.randomUUID());
   const kind = result.intent === "receivable" ? ("receivable" as const) : ("payable" as const);
   const preset = kind === "receivable" ? result.customerId : result.supplierId;
   const [partyId, setPartyId] = useState<string | null>(preset);
@@ -468,7 +473,10 @@ function DebtRecordCard({
     if (!canRecord || record.isPending || partyId === null || amountMinor === null) return;
     setErrorId(null);
     try {
-      const debt = await record.mutateAsync({ kind, counterparty_id: partyId, amount_minor: amountMinor, entry_method: result.origin ?? "text" });
+      const debt = await record.mutateAsync({
+        kind, counterparty_id: partyId, amount_minor: amountMinor,
+        entry_method: result.origin ?? "text", idempotencyKey: idempotencyKeyRef.current,
+      });
       onRecorded(t("parties.debtAdded", { amount: debt.outstanding.display }));
     } catch (e) {
       setErrorId(isDomainError(e) ? e.messageId : "error.generic");

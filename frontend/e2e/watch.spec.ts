@@ -33,8 +33,10 @@ test("watch surfaces real recorded conditions: low stock + overdue debt, with wh
   const lowRow = page.getByTestId("watch-row").filter({ hasText: "running low" });
   await expect(lowRow).toBeVisible();
 
-  // Overdue customer payment (Aminata's Le 120,000, due 2 days ago)
-  const overdueRow = page.getByTestId("watch-row").filter({ hasText: "overdue" });
+  // Overdue customer payment (Aminata's Le 120,000). The alert now says how
+  // long the money has been owed rather than referring to a due date, because
+  // nothing in the product ever sets one.
+  const overdueRow = page.getByTestId("watch-row").filter({ hasText: "owed you" });
   await expect(overdueRow).toContainText("Aminata");
   await expect(overdueRow).toContainText("Le 120,000");
 
@@ -49,11 +51,11 @@ test("watch surfaces real recorded conditions: low stock + overdue debt, with wh
 
 test("watch never duplicates an alert for the same condition", async ({ page }) => {
   await signIn(page);
-  await expect(page.getByTestId("watch-row").filter({ hasText: "overdue" })).toHaveCount(1);
+  await expect(page.getByTestId("watch-row").filter({ hasText: "owed you" })).toHaveCount(1);
   // Re-visit Home — derived state, not an accumulating log
   await page.getByRole("link", { name: "Money" }).click();
   await page.getByRole("link", { name: "Home" }).click();
-  await expect(page.getByTestId("watch-row").filter({ hasText: "overdue" })).toHaveCount(1);
+  await expect(page.getByTestId("watch-row").filter({ hasText: "owed you" })).toHaveCount(1);
 });
 
 test("trend tiles show current value with an honest direction indicator", async ({ page }) => {

@@ -108,10 +108,17 @@ export function useRecordPurchase() {
     mutationFn: ({
       productId,
       input,
+      idempotencyKey,
     }: {
       productId: string;
       input: { quantity: number; unit_cost_minor: number; paid: boolean; supplier_id?: string; entry_method?: "manual" | "text" | "voice" };
-    }) => api<{ product: Product }>(`/businesses/${BUSINESS_ID}/products/${productId}/stock`, { method: "POST", body: input }),
+      idempotencyKey?: string;
+    }) =>
+      api<{ product: Product }>(`/businesses/${BUSINESS_ID}/products/${productId}/stock`, {
+        method: "POST",
+        body: input,
+        idempotencyKey,
+      }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["products"] });
       void qc.invalidateQueries({ queryKey: ["product"] });
@@ -128,10 +135,11 @@ export function useRecordPurchase() {
 export function useRecordDebt() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ kind, counterparty_id, amount_minor, entry_method }: { kind: "receivable" | "payable"; counterparty_id: string; amount_minor: number; entry_method?: "manual" | "text" | "voice" }) =>
+    mutationFn: ({ kind, counterparty_id, amount_minor, entry_method, idempotencyKey }: { kind: "receivable" | "payable"; counterparty_id: string; amount_minor: number; entry_method?: "manual" | "text" | "voice"; idempotencyKey?: string }) =>
       api<Debt>(`/businesses/${BUSINESS_ID}/${kind === "receivable" ? "receivables" : "payables"}`, {
         method: "POST",
         body: { counterparty_id, amount_minor, entry_method: entry_method ?? "manual" },
+        idempotencyKey,
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["debts"] });

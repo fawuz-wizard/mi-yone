@@ -11,6 +11,19 @@ from .finance import audit, create_transaction
 STOCK_CATEGORY = "Stock purchase"
 
 
+def posted_movements(business_id: str | None = None, product_id: str | None = None):
+    """Every stock aggregate reads through this. A REVERSED movement stays in
+    the ledger for history but must never count toward stock, units sold,
+    price history, or any alert — one filter, one place, so the surfaces
+    cannot drift apart."""
+    q = select(StockMovement).where(StockMovement.status == "POSTED")
+    if business_id is not None:
+        q = q.where(StockMovement.business_id == business_id)
+    if product_id is not None:
+        q = q.where(StockMovement.product_id == product_id)
+    return q
+
+
 def get_product(db: Session, business_id: str, product_id: str, include_archived: bool = True) -> Product:
     p = db.scalar(select(Product).where(Product.id == product_id, Product.business_id == business_id))
     if p is None or (p.archived and not include_archived):
@@ -18,7 +31,7 @@ def get_product(db: Session, business_id: str, product_id: str, include_archived
     return p
 
 
-def add_movement(db: Session, business_id: str, product_id: str, actor: str, type_: str, delta: int, unit_cost_minor: int | None = None, note: str | None = None) -> StockMovement:
+def add_movement(db: Session, business_id: str, product_id: str, actor: str, type_: str, delta: int, unit_cost_minor: int | None = None, note: str | None = None, sale_id: str | None = None) -> StockMovement:
     m = StockMovement(
         id=gen_id("mv"),
         business_id=business_id,
@@ -29,14 +42,27 @@ def add_movement(db: Session, business_id: str, product_id: str, actor: str, typ
         occurred_at=utcnow(),
         recorded_by=actor,
         note=note,
+        sale_id=sale_id,
     )
     db.add(m)
     db.flush()
     return m
 
 
-def add_stock(db: Session, business_id: str, actor: str, product_id: str, *, quantity: int, unit_cost_minor: int, paid: bool, supplier_id: str | None, entry_method: str = "manual") -> tuple[Product, StockMovement]:
-    """One action: PURCHASE movement + expense (paid) or supplier payable (owed)."""
+def add_stock(db: Session, business_id: str, actor: str, product_id: str, *, quantity: int, unit_cost_minor: int, paid: bool, supplier_id: str | None, entry_method: str = "manual", idempotency_key: str | None = None) -> tuple[Product, StockMovement]:
+    """One action: PURCHASE movement + expense (paid) or supplier payable (owed).
+
+    A retry on a weak connection must not buy the stock twice. The key is
+    stamped on the movement, and a repeat returns the original."""
+    if idempotency_key:
+        existing = db.scalar(
+            select(StockMovement).where(
+                StockMovement.business_id == business_id,
+                StockMovement.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            return get_product(db, business_id, existing.product_id), existing
     p = get_product(db, business_id, product_id, include_archived=False)
     if quantity <= 0 or unit_cost_minor < 0:
         raise ApiError(422, "VALIDATION_ERROR", "This stock entry could not be recorded.")
@@ -45,6 +71,7 @@ def add_stock(db: Session, business_id: str, actor: str, product_id: str, *, qua
     if unit_cost_minor > 0:
         p.cost_minor = unit_cost_minor  # latest-cost model (Phase 2 §7.1)
     m = add_movement(db, business_id, product_id, actor, "PURCHASE", quantity, unit_cost_minor or None)
+    m.idempotency_key = idempotency_key
     total = quantity * unit_cost_minor
     if total > 0:
         if paid:

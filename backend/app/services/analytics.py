@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..common.money import format_money
 from ..models import Business, Debt, Party, Product, Sale, StockMovement, Transaction, utcnow
-from ..serializers import stock_of
+from ..serializers import debt_is_overdue, stock_of
 from .finance import visible_query
 
 PERF_RANGES = {"7d": ("day", 7), "30d": ("day", 30), "3m": ("week", 13), "6m": ("month", 6), "1y": ("month", 12)}
@@ -42,13 +42,13 @@ def attention_items(db: Session, business_id: str) -> list[dict]:
         first_stock = stock_of(db, low[0].id)
         text = f"{low[0].name} is running low ({first_stock} left)" if len(low) == 1 else f"{len(low)} products are running low"
         items.append({"id": "att-low-stock", "kind": "low_stock", "severity": "warning", "text": text, "target": "/stock"})
-    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id)))
+    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.status == "POSTED")))
     now = utcnow()
     owed_rows = [d for d in debts if d.kind == "receivable" and d.amount_minor - d.settled_minor > 0]
     owed = sum(d.amount_minor - d.settled_minor for d in owed_rows)
     if owed > 0:
         n = len(owed_rows)
-        overdue = any(d.due_date is not None and d.due_date < now for d in owed_rows)
+        overdue = any(debt_is_overdue(d) for d in owed_rows)
         items.append({
             "id": "att-owed", "kind": "owed_to_you", "severity": "danger" if overdue else "warning",
             "text": f"{n} {'customer owes' if n == 1 else 'customers owe'} you {format_money(owed)['display']}",
@@ -231,7 +231,7 @@ def trends(db: Session, business_id: str, range_: str) -> dict:
     # "enough history" = anything at all recorded before the current window
     has_history = any(t.occurred_at < cur_start for t in rows)
 
-    sales_rows = list(db.scalars(select(Sale).where(Sale.business_id == business_id)))
+    sales_rows = list(db.scalars(select(Sale).where(Sale.business_id == business_id, Sale.status == "POSTED")))
     cur_sales = sum(s.total_minor for s in sales_rows if cur_start <= s.occurred_at < end)
     prev_sales = sum(s.total_minor for s in sales_rows if prev_start <= s.occurred_at < cur_start)
 
@@ -239,14 +239,14 @@ def trends(db: Session, business_id: str, range_: str) -> dict:
     prev_in, prev_out = _sum_window(rows, prev_start, cur_start)
 
     movements = [
-        m for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business_id, StockMovement.type == "SALE"))
+        m for m in db.scalars(select(StockMovement).where(StockMovement.business_id == business_id, StockMovement.type == "SALE", StockMovement.status == "POSTED"))
     ]
     cur_units = sum(abs(m.quantity_delta) for m in movements if cur_start <= m.occurred_at < end)
     prev_units = sum(abs(m.quantity_delta) for m in movements if prev_start <= m.occurred_at < cur_start)
 
     # Owed to you: outstanding now, and its exact change over the window
     # (new credit extended − settlements received; both are recorded facts).
-    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.kind == "receivable")))
+    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.status == "POSTED", Debt.kind == "receivable")))
     outstanding_now = sum(d.amount_minor - d.settled_minor for d in debts)
     new_credit = sum(d.amount_minor for d in debts if cur_start <= d.since < end)
     collected = sum(
@@ -317,6 +317,29 @@ def trends(db: Session, business_id: str, range_: str) -> dict:
     return {"range": range_, "metrics": metrics, "contributors": contributors}
 
 
+def product_revenue(movements: list, current_price_minor: int) -> tuple[int, bool]:
+    """What a product actually earned, from the price recorded on each sale.
+
+    Sale movements carry the unit price they were sold at. Multiplying units by
+    TODAY'S price meant a price change silently rewrote closed periods — raise
+    rice from Le 350 to Le 400 and last month's report went up on its own, and
+    because revenue is also the sort key, the ranking moved too.
+
+    A movement with no unit price is a bundled total ("two things for Le 900"),
+    where no honest per-unit figure exists; those units fall back to the
+    current price and the caller is told the total is not exact."""
+    total = 0
+    exact = True
+    for m in movements:
+        units = abs(m.quantity_delta)
+        if m.unit_cost_minor is not None:
+            total += units * m.unit_cost_minor
+        else:
+            total += units * current_price_minor
+            exact = False
+    return total, exact
+
+
 def report(db: Session, business_id: str, period: str) -> dict:
     now = utcnow()
     if period == "today":
@@ -342,23 +365,33 @@ def report(db: Session, business_id: str, period: str) -> dict:
     cash_in = sum(t.amount_minor for t in rows if t.type == "INCOME")
     cash_out = sum(t.amount_minor for t in rows if t.type == "EXPENSE")
 
-    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id)))
+    debts = list(db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.status == "POSTED")))
     credit_extended = sum(d.amount_minor for d in debts if d.kind == "receivable" and d.source == "SALE" and start <= d.since < end)
     credit_purchases = sum(d.amount_minor for d in debts if d.kind == "payable" and d.source == "PURCHASE" and start <= d.since < end)
     booked_revenue = sum(t.amount_minor for t in rows if t.type == "INCOME" and t.source != "SETTLEMENT") + credit_extended
     booked_expenses = sum(t.amount_minor for t in rows if t.type == "EXPENSE" and t.source != "SETTLEMENT") + credit_purchases
 
-    sales = [s for s in db.scalars(select(Sale).where(Sale.business_id == business_id)) if start <= s.occurred_at < end]
+    sales = [s for s in db.scalars(select(Sale).where(Sale.business_id == business_id, Sale.status == "POSTED")) if start <= s.occurred_at < end]
 
     top: list[dict] = []
     for p in db.scalars(select(Product).where(Product.business_id == business_id)):
-        sold = sum(
-            abs(m.quantity_delta)
-            for m in db.scalars(select(StockMovement).where(StockMovement.product_id == p.id, StockMovement.type == "SALE"))
+        moves = [
+            m
+            for m in db.scalars(select(StockMovement).where(StockMovement.product_id == p.id, StockMovement.type == "SALE", StockMovement.status == "POSTED"))
             if start <= m.occurred_at < end
-        )
+        ]
+        sold = sum(abs(m.quantity_delta) for m in moves)
         if sold > 0:
-            top.append({"name": p.name, "units": sold, "revenue_estimate": format_money(sold * p.selling_minor)})
+            revenue, exact = product_revenue(moves, p.selling_minor)
+            top.append({
+                "name": p.name,
+                "units": sold,
+                "revenue_estimate": format_money(revenue),
+                # True when every unit's price came from the sale that recorded
+                # it. False means at least one movement had no unit price (a
+                # bundled total) and today's price stood in for those units.
+                "revenue_exact": exact,
+            })
     top.sort(key=lambda x: -x["revenue_estimate"]["amount_minor"])
 
     by_cat: dict[str, int] = {}
@@ -389,14 +422,33 @@ def report(db: Session, business_id: str, period: str) -> dict:
 def report_csv(db: Session, business: Business, period: str) -> str:
     r = report(db, business.id, period)
     start, end = r.pop("_window")
-    esc = lambda s: '"' + s.replace('"', '""') + '"'  # noqa: E731
+    def esc(value: str) -> str:
+        """Quote a CSV field, and stop a spreadsheet treating it as a formula.
+
+        Descriptions, category names and the recorded-by name all reach this
+        file, and all three are text a person typed. A field starting with
+        =, +, - or @ is executed by Excel and LibreOffice when the owner opens
+        their own report, so it is prefixed with an apostrophe."""
+        text = value or ""
+        if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+            text = "'" + text
+        return '"' + text.replace('"', '""') + '"'
+
+    def money(minor: int) -> str:
+        """Exact money, always. The old ':g' format kept six significant
+        digits, so Le 1,234,567.89 was written as 1.23457e+06 and anything
+        above Le 9,999.99 was silently rounded."""
+        sign = "-" if minor < 0 else ""
+        whole, cents = divmod(abs(int(minor)), 100)
+        return f"{sign}{whole}.{cents:02d}"
+
     lines = [f"MI YONE report,{esc(business.name)},{esc(r['period_label'])}", ""]
     lines.append("Summary,,Amount (Le)")
-    lines.append(f"Money in,,{r['cash']['money_in']['amount_minor'] / 100:g}")
-    lines.append(f"Money out,,{r['cash']['money_out']['amount_minor'] / 100:g}")
-    lines.append(f"Left over (cash),,{r['cash']['left_over']['amount_minor'] / 100:g}")
-    lines.append(f"Profit (estimated),,{r['profit']['profit']['amount_minor'] / 100:g}")
-    lines.append(f"Credit extended to customers,,{r['profit']['credit_extended']['amount_minor'] / 100:g}")
+    lines.append(f"Money in,,{money(r['cash']['money_in']['amount_minor'])}")
+    lines.append(f"Money out,,{money(r['cash']['money_out']['amount_minor'])}")
+    lines.append(f"Left over (cash),,{money(r['cash']['left_over']['amount_minor'])}")
+    lines.append(f"Profit (estimated),,{money(r['profit']['profit']['amount_minor'])}")
+    lines.append(f"Credit extended to customers,,{money(r['profit']['credit_extended']['amount_minor'])}")
     lines.append(f"Sales count,,{r['sales']['count']}")
     lines.append("")
     lines.append("Date,Type,Category,Description,Amount (Le),Recorded by")
@@ -409,7 +461,7 @@ def report_csv(db: Session, business: Business, period: str) -> str:
                 "Money in" if t.type == "INCOME" else "Money out",
                 esc(t.category_name),
                 esc(t.description or ""),
-                f"{signed / 100:g}",
+                money(signed),
                 esc(t.recorded_by),
             ])
         )

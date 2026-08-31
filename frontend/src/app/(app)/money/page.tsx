@@ -84,9 +84,12 @@ function MoneyScreen() {
     [debtsQuery.data, q],
   );
 
+  // Totals the rows the owner can actually SEE. Summing the unfiltered list
+  // meant searching for one customer showed a single Le 45,000 card under a
+  // header still reading Le 2,340,000.
   const debtTotal = useMemo(
-    () => (debtsQuery.data ?? []).reduce((a, d) => a + d.outstanding.amount_minor, 0),
-    [debtsQuery.data],
+    () => filteredDebts.reduce((a, d) => a + d.outstanding.amount_minor, 0),
+    [filteredDebts],
   );
 
   return (
@@ -228,12 +231,17 @@ function MoneyScreen() {
   );
 }
 
-// Grouping-only display helper: renders the server minor units with grouping.
-// Not financial calculation — the total is a sum of server-provided outstanding
-// values for display in one line; each figure shown per-debt is server-formatted.
+// Display helper: renders a sum of SERVER-provided minor units. Every per-debt
+// figure on screen is server-formatted; this line adds up what is listed so the
+// header matches the rows beneath it.
+// It formats the exact value — the old version truncated with Math.trunc, so
+// Le 45,000.75 was shown as Le 45,000 and the cents quietly disappeared.
 function formatTotal(minor: number): string {
-  const whole = Math.trunc(minor / 100);
-  return `Le ${whole.toLocaleString("en-US")}`;
+  const negative = minor < 0;
+  const whole = Math.floor(Math.abs(minor) / 100);
+  const cents = Math.abs(minor) % 100;
+  const grouped = whole.toLocaleString("en-US");
+  return `${negative ? "−" : ""}Le ${grouped}${cents ? `.${String(cents).padStart(2, "0")}` : ""}`;
 }
 
 function groupByDay(rows: Transaction[]): { key: string; rows: Transaction[] }[] {

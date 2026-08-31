@@ -5,13 +5,15 @@
   "scripts": {
     "tokens": "node scripts/build-tokens.mjs",
     "predev": "npm run tokens",
-    "dev": "next dev",
+    "dev": "MIYONE_MOCK_API=on next dev",
     "prebuild": "npm run tokens",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
     "e2e": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dev:real": "next dev",
+    "build:mock": "MIYONE_MOCK_API=on next build"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

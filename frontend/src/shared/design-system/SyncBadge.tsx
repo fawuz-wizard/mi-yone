@@ -14,7 +14,14 @@ export function SyncBadge() {
   useEffect(() => {
     const flush = () => void captureQueue.flush();
     window.addEventListener("online", flush);
-    return () => window.removeEventListener("online", flush);
+    // Android reports "online" for a cell interface that carries no traffic, so
+    // the single event-driven attempt usually failed and the record then sat
+    // behind a small badge nobody had a reason to look at. Retry on a timer too.
+    const timer = window.setInterval(flush, 15_000);
+    return () => {
+      window.removeEventListener("online", flush);
+      window.clearInterval(timer);
+    };
   }, []);
 
   if (items.length === 0) return null;
@@ -38,6 +45,8 @@ export function SyncBadge() {
       {open ? (
         <div className="absolute right-0 top-12 z-40 w-72 rounded-card border border-border bg-surface p-3 shadow-float">
           <p className="text-sm text-text-secondary">{failed ? t("sync.failedTitle") : t("sync.pending")}</p>
+          {/* Honest until the durable queue exists: this lives in the page. */}
+          <p className="mt-1 text-sm font-medium text-warning">{t("sync.keepOpen")}</p>
           <ul className="mt-2 space-y-1">
             {items.map((i) => (
               <li key={i.idempotencyKey} className="money text-sm font-medium">

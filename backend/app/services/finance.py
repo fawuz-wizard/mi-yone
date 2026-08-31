@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..common.ids import gen_id
 from ..core.envelope import ApiError
-from ..models import AuditEvent, Category, Transaction, utcnow
+from ..models import AuditEvent, Category, Debt, Transaction, utcnow
 
 AMOUNT_CAP_MINOR = 100_000_000_000
 
@@ -52,6 +52,7 @@ def create_transaction(
     source: str = "MANUAL",
     idempotency_key: str | None = None,
     entry_method: str = "manual",
+    debt_id: str | None = None,
 ) -> tuple[Transaction, bool]:
     if entry_method not in ("manual", "text", "voice", "scan"):
         entry_method = "manual"
@@ -80,6 +81,7 @@ def create_transaction(
         entry_method=entry_method,
         counterparty_id=counterparty_id,
         idempotency_key=idempotency_key,
+        debt_id=debt_id,
     )
     db.add(t)
     audit(db, business_id, actor, "transaction.create", "transaction", t.id)
@@ -99,6 +101,13 @@ def _posted(db: Session, business_id: str, tx_id: str) -> Transaction:
 def reverse_transaction(db: Session, business_id: str, actor: str, tx_id: str) -> None:
     original = _posted(db, business_id, tx_id)
     original.status = "REVERSED"
+    # A settlement is money applied to a debt. Taking the money out of the
+    # ledger without putting the amount back on the debt would mark it paid
+    # for ever and nobody would chase it again.
+    if original.source == "SETTLEMENT" and original.debt_id:
+        debt = db.scalar(select(Debt).where(Debt.id == original.debt_id, Debt.business_id == business_id))
+        if debt is not None:
+            debt.settled_minor = max(0, debt.settled_minor - original.amount_minor)
     now = utcnow()
     db.add(
         Transaction(
@@ -114,6 +123,7 @@ def reverse_transaction(db: Session, business_id: str, actor: str, tx_id: str) -
             recorded_by=actor,
             source=original.source,
             counterparty_id=original.counterparty_id,
+            debt_id=original.debt_id,
             reverses_transaction_id=original.id,
         )
     )
@@ -152,6 +162,7 @@ def fix_transaction(
             recorded_by=actor,
             source=original.source,
             counterparty_id=original.counterparty_id,
+            debt_id=original.debt_id,
             reverses_transaction_id=original.id,
         )
     )

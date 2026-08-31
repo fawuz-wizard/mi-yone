@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 
 from ..common.ids import gen_id
 from ..core.envelope import ApiError
-from ..models import Debt, Party, Product, Sale, Transaction, utcnow
-from .finance import audit, create_transaction
+from ..models import Debt, Party, Product, Sale, StockMovement, Transaction, utcnow
+from ..serializers import stock_of
+from .finance import audit, create_transaction, reverse_transaction
 from .inventory import add_movement
 
 
@@ -41,17 +42,27 @@ def create_sale(
     if credit > 0 and not customer_id:
         raise ApiError(422, "VALIDATION_ERROR", "This sale could not be recorded.")
 
+    sale_id = gen_id("s")
     product = None
     if product_id:
         product = db.scalar(select(Product).where(Product.id == product_id, Product.business_id == business_id))
     if product and product.track_inventory:
+        # The same hard stock check the multi-item checkout path already made.
+        # Both sale paths must refuse to sell what the records say isn't there.
+        wanted = quantity or 1
+        available = stock_of(db, product.id)
+        if wanted > available:
+            raise ApiError(
+                422, "VALIDATION_ERROR",
+                f"Not enough {product.name} in stock — you have {available}.",
+            )
         # Store the unit price ON the movement (unit_cost_minor doubles as the
         # movement's unit value: cost for purchases, selling price for sales) —
         # this is the price HISTORY future suggestions read. Only when the
         # total divides cleanly; a bundled price stays on the transaction.
         qty = quantity or 1
         unit_value = amount_minor // qty if amount_minor % qty == 0 else None
-        add_movement(db, business_id, product.id, actor, "SALE", -qty, unit_value)
+        add_movement(db, business_id, product.id, actor, "SALE", -qty, unit_value, sale_id=sale_id)
 
     cash_tx = None
     if paid > 0:
@@ -72,7 +83,7 @@ def create_sale(
         db.add(receivable)
 
     sale = Sale(
-        id=gen_id("s"),
+        id=sale_id,
         business_id=business_id,
         total_minor=total,
         occurred_at=utcnow(),
@@ -110,8 +121,7 @@ def checkout(
 
     # Resolve every line against THIS business's products; compute the total
     # from the server's own current prices; validate stock before anything moves.
-    from ..serializers import stock_of  # local import to avoid a cycle
-
+    sale_id = gen_id("s")
     lines: list[dict] = []
     seen: set[str] = set()
     for raw in items:
@@ -140,7 +150,7 @@ def checkout(
 
     for line in lines:
         if line["product"].track_inventory:
-            add_movement(db, business_id, line["product"].id, actor, "SALE", -line["quantity"], line["unit_minor"])
+            add_movement(db, business_id, line["product"].id, actor, "SALE", -line["quantity"], line["unit_minor"], sale_id=sale_id)
 
     description = ", ".join(f"{line['product'].name} ×{line['quantity']}" for line in lines)[:500]
     cash_tx, _ = create_transaction(
@@ -151,7 +161,7 @@ def checkout(
         entry_method="scan",
     )
     sale = Sale(
-        id=gen_id("s"),
+        id=sale_id,
         business_id=business_id,
         total_minor=total,
         occurred_at=utcnow(),
@@ -169,6 +179,8 @@ def settle_debt(db: Session, business_id: str, actor: str, debt_id: str, amount_
     debt = db.scalar(select(Debt).where(Debt.id == debt_id, Debt.business_id == business_id))
     if debt is None:
         raise ApiError(404, "NOT_FOUND", "Record not found.")
+    if debt.status != "POSTED":
+        raise ApiError(409, "CONFLICT", "This record was already fixed or removed.")
     outstanding = debt.amount_minor - debt.settled_minor
     if not isinstance(amount_minor, int) or amount_minor <= 0 or amount_minor > outstanding:
         raise ApiError(422, "VALIDATION_ERROR", "The payment is more than what is owed.")
@@ -182,18 +194,126 @@ def settle_debt(db: Session, business_id: str, actor: str, debt_id: str, amount_
         description=(f"Payment from {party.name}" if is_receivable else f"Payment to {party.name}") if party else None,
         counterparty_id=debt.counterparty_id,
         source="SETTLEMENT",
+        debt_id=debt.id,
     )
     audit(db, business_id, actor, "debt.settle", "debt", debt.id, f"{amount_minor}")
     return debt, tx
 
 
-def add_manual_debt(db: Session, business_id: str, actor: str, kind: str, counterparty_id: str, amount_minor: int, *, entry_method: str = "manual") -> Debt:
+def add_manual_debt(db: Session, business_id: str, actor: str, kind: str, counterparty_id: str, amount_minor: int, *, entry_method: str = "manual", idempotency_key: str | None = None) -> Debt:
+    if idempotency_key:
+        existing = db.scalar(
+            select(Debt).where(Debt.business_id == business_id, Debt.idempotency_key == idempotency_key)
+        )
+        if existing is not None:
+            return existing
     party_kind = "customer" if kind == "receivable" else "supplier"
     party = db.scalar(select(Party).where(Party.id == counterparty_id, Party.business_id == business_id, Party.kind == party_kind))
     if party is None or not isinstance(amount_minor, int) or amount_minor <= 0:
         raise ApiError(422, "VALIDATION_ERROR", "This debt could not be recorded.")
-    debt = Debt(id=gen_id("r" if kind == "receivable" else "pay"), business_id=business_id, kind=kind, counterparty_id=party.id, amount_minor=amount_minor, settled_minor=0, since=utcnow(), due_date=None, source="MANUAL", entry_method=entry_method if entry_method in ("manual", "text", "voice") else "manual")
+    debt = Debt(id=gen_id("r" if kind == "receivable" else "pay"), business_id=business_id, kind=kind, counterparty_id=party.id, amount_minor=amount_minor, settled_minor=0, since=utcnow(), due_date=None, source="MANUAL", entry_method=entry_method if entry_method in ("manual", "text", "voice") else "manual", idempotency_key=idempotency_key)
     db.add(debt)
     audit(db, business_id, actor, "debt.manual", "debt", debt.id)
     db.flush()
     return debt
+
+
+def reverse_sale(db: Session, business_id: str, actor: str, sale_id: str) -> Sale:
+    """Remove a whole sale, not just its cash line.
+
+    A sale can create up to four things: a cash transaction, a receivable, the
+    payments made against that receivable, and stock movements. Reversing only
+    the cash left the other three standing, so Reports could show 'money in
+    Le 0' and '1 sale, Le 50,000' at the same time, stock stayed short, and a
+    cancelled credit sale kept inflating booked revenue for ever.
+
+    This reverses all of it, in the immutable way the rest of MI YONE works:
+    nothing is deleted, rows are marked REVERSED and stay in the history."""
+    sale = db.scalar(select(Sale).where(Sale.id == sale_id, Sale.business_id == business_id))
+    if sale is None:
+        raise ApiError(404, "NOT_FOUND", "Record not found.")
+    if sale.status != "POSTED":
+        raise ApiError(409, "CONFLICT", "This record was already fixed or removed.")
+
+    # 1. the cash that came in
+    if sale.cash_transaction_id:
+        cash = db.get(Transaction, sale.cash_transaction_id)
+        if cash is not None and cash.status == "POSTED":
+            reverse_transaction(db, business_id, actor, cash.id)
+
+    # 2. the credit extended, and any payments already made against it
+    if sale.receivable_id:
+        debt = db.scalar(select(Debt).where(Debt.id == sale.receivable_id, Debt.business_id == business_id))
+        if debt is not None and debt.status == "POSTED":
+            settlements = list(
+                db.scalars(
+                    select(Transaction).where(
+                        Transaction.business_id == business_id,
+                        Transaction.debt_id == debt.id,
+                        Transaction.status == "POSTED",
+                        Transaction.reverses_transaction_id.is_(None),
+                    )
+                )
+            )
+            for s_tx in settlements:
+                reverse_transaction(db, business_id, actor, s_tx.id)
+            debt.status = "REVERSED"
+
+    # 3. the stock that left the shelf
+    movements = list(
+        db.scalars(
+            select(StockMovement).where(
+                StockMovement.business_id == business_id,
+                StockMovement.sale_id == sale.id,
+                StockMovement.status == "POSTED",
+            )
+        )
+    )
+    for m in movements:
+        m.status = "REVERSED"
+
+    sale.status = "REVERSED"
+    audit(db, business_id, actor, "sale.reverse", "sale", sale.id, f"{len(movements)} stock movements")
+    db.flush()
+    return sale
+
+
+def reverse_debt(db: Session, business_id: str, actor: str, debt_id: str) -> None:
+    """Remove a debt record. A receivable that came from a credit sale has no
+    cash transaction to remove, so this is the only door to that sale — it
+    reverses the whole sale. A manually added debt reverses on its own, along
+    with any payments recorded against it."""
+    debt = db.scalar(select(Debt).where(Debt.id == debt_id, Debt.business_id == business_id))
+    if debt is None:
+        raise ApiError(404, "NOT_FOUND", "Record not found.")
+    if debt.status != "POSTED":
+        raise ApiError(409, "CONFLICT", "This record was already fixed or removed.")
+
+    if debt.source == "SALE":
+        sale = db.scalar(select(Sale).where(Sale.receivable_id == debt.id, Sale.business_id == business_id))
+        if sale is not None:
+            reverse_sale(db, business_id, actor, sale.id)
+            return
+    if debt.source == "PURCHASE":
+        # A supplier payable belongs to a stock purchase, which also moved
+        # stock and may have created an expense. Removing only the debt would
+        # leave those standing — the same defect this work exists to fix — so
+        # it is refused until purchase reversal is built rather than done
+        # half-way.
+        raise ApiError(
+            422, "VALIDATION_ERROR",
+            "This is part of a stock purchase. Record a stock correction instead.",
+        )
+
+    for s_tx in db.scalars(
+        select(Transaction).where(
+            Transaction.business_id == business_id,
+            Transaction.debt_id == debt.id,
+            Transaction.status == "POSTED",
+            Transaction.reverses_transaction_id.is_(None),
+        )
+    ):
+        reverse_transaction(db, business_id, actor, s_tx.id)
+    debt.status = "REVERSED"
+    audit(db, business_id, actor, "debt.reverse", "debt", debt.id)
+    db.flush()

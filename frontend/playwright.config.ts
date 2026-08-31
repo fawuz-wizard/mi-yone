@@ -15,7 +15,11 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: "npm run start -- --port 3100",
+    // The mock API is opt-in by design (see next.config.mjs). The suite runs
+    // against it unless MIYONE_BACKEND_URL points at the real backend.
+    command: process.env.MIYONE_BACKEND_URL
+      ? "npm run start -- --port 3100"
+      : "MIYONE_MOCK_API=on npm run start -- --port 3100",
     url: "http://localhost:3100/welcome",
     reuseExistingServer: true,
     timeout: 60_000,

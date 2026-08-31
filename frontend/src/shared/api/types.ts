@@ -28,6 +28,8 @@ export interface Transaction {
   entry_method?: "manual" | "text" | "voice" | "scan"; // HOW it was entered (owner provenance)
   counterparty_id: string | null; // customer/supplier this row concerns, when known
   reverses_transaction_id: string | null;
+  // For a payment row: the debt it was applied to.
+  debt_id?: string | null;
   fixed?: { by: string; was: Money; now: Money } | null;
 }
 
@@ -182,6 +184,9 @@ export interface WatchAlert {
   why: string;
   action: string;
   target: string;
+  // Money at stake, in minor units. Severity picks the band; this orders
+  // within it, so a large overdue debt is not ranked below a low-stock note.
+  weight?: number;
 }
 
 export interface WatchResponse {
@@ -239,8 +244,12 @@ export interface StockMovement {
   quantity_delta: number; // signed
   unit_cost: Money | null;
   occurred_at: string;
+  created_at?: string;
   recorded_by: string;
   note: string | null;
+  // A removed movement stays in the history and stops counting toward stock.
+  status?: "POSTED" | "REVERSED";
+  sale_id?: string | null;
 }
 
 export interface CreateProductInput {
@@ -330,7 +339,9 @@ export interface Debt {
   outstanding: Money; // derived server-side from settlements
   since: string; // ISO date the debt started
   due_date: string | null;
-  overdue: boolean;
+  overdue: boolean; // age-based when no due date was set
+  days_owed: number;
+  source: "SALE" | "MANUAL" | "PURCHASE";
   status: "OPEN" | "PARTIAL" | "SETTLED";
 }
 
@@ -375,7 +386,9 @@ export interface ReportResponse {
   sales: {
     count: number;
     total: Money;
-    top_products: { name: string; units: number; revenue_estimate: Money }[];
+    // revenue_exact false = at least one sale was recorded as a bundled total
+    // with no per-item price, so today's price stood in for those units.
+    top_products: { name: string; units: number; revenue_estimate: Money; revenue_exact?: boolean }[];
   };
   expenses_by_category: { name: string; total: Money }[];
 }

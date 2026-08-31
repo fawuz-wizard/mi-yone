@@ -20,21 +20,46 @@ interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   idempotencyKey?: string;
+  timeoutMs?: number;
+}
+
+// On a weak connection a request can hang indefinitely. That used to leave the
+// Save button spinning with no way out, and when the owner closed the sheet and
+// tried again they got a NEW idempotency key — so a late-landing request could
+// still create a second record. A request that has not answered by now is
+// treated as a failure the owner can retry with the SAME key.
+const DEFAULT_TIMEOUT_MS = 20_000;
+const UPLOAD_TIMEOUT_MS = 60_000; // photos are large and connections are slow
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
-      method: opts.method ?? "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...(opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : {}),
+    res = await fetchWithTimeout(
+      `${BASE}${path}`,
+      {
+        method: opts.method ?? "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : {}),
+        },
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        credentials: "same-origin",
       },
-      body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-      credentials: "same-origin",
-    });
+      opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    );
   } catch {
+    // A timeout and a dead connection are the same thing to the owner: it did
+    // not go through, and the record is still theirs to retry.
     throw networkError();
   }
   let envelope: Envelope<T> | undefined;
@@ -58,7 +83,11 @@ export async function apiUpload<T>(path: string, file: File | Blob, fieldName = 
   form.append(fieldName, file);
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, { method: "POST", body: form, credentials: "same-origin" });
+    res = await fetchWithTimeout(
+      `${BASE}${path}`,
+      { method: "POST", body: form, credentials: "same-origin" },
+      UPLOAD_TIMEOUT_MS,
+    );
   } catch {
     throw networkError();
   }

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from ..common.money import format_money
 from ..core.db import get_db
-from ..core.deps import TenantContext, tenant
+from ..core.deps import TenantContext, tenant, tenant_admin
 from ..core.envelope import ok
 from ..models import Debt
 from ..serializers import debt_json, tx_json
@@ -105,7 +105,7 @@ def checkout(
 def _list_debts(db: Session, business_id: str, kind: str) -> list[dict]:
     rows = [
         debt_json(db, d)
-        for d in db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.kind == kind))
+        for d in db.scalars(select(Debt).where(Debt.business_id == business_id, Debt.status == "POSTED", Debt.kind == kind))
         if d.amount_minor - d.settled_minor > 0
     ]
     rows.sort(key=lambda d: (not d["overdue"], d["since"]))
@@ -118,8 +118,12 @@ def list_receivables(ctx: TenantContext = Depends(tenant), db: Session = Depends
 
 
 @router.post("/receivables")
-def create_receivable(body: CreateDebtInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
-    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "receivable", body.counterparty_id, body.amount_minor, entry_method=body.entry_method)
+def create_receivable(
+    body: CreateDebtInput,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=80),
+    ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db),
+):
+    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "receivable", body.counterparty_id, body.amount_minor, entry_method=body.entry_method, idempotency_key=idempotency_key)
     return ok(debt_json(db, debt), status_code=201)
 
 
@@ -129,9 +133,21 @@ def list_payables(ctx: TenantContext = Depends(tenant), db: Session = Depends(ge
 
 
 @router.post("/payables")
-def create_payable(body: CreateDebtInput, ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db)):
-    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "payable", body.counterparty_id, body.amount_minor, entry_method=body.entry_method)
+def create_payable(
+    body: CreateDebtInput,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", max_length=80),
+    ctx: TenantContext = Depends(tenant), db: Session = Depends(get_db),
+):
+    debt = trade.add_manual_debt(db, ctx.business.id, ctx.user.full_name, "payable", body.counterparty_id, body.amount_minor, entry_method=body.entry_method, idempotency_key=idempotency_key)
     return ok(debt_json(db, debt), status_code=201)
+
+
+@router.post("/debts/{debt_id}/reverse")
+def reverse_debt(debt_id: str, ctx: TenantContext = Depends(tenant_admin), db: Session = Depends(get_db)):
+    """Remove a debt record. For a receivable created by a credit sale this is
+    the only door to that sale, so it removes the whole sale."""
+    trade.reverse_debt(db, ctx.business.id, ctx.user.full_name, debt_id)
+    return ok({"reversed": True})
 
 
 @router.post("/debts/{debt_id}/settlements")
