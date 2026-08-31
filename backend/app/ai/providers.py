@@ -29,7 +29,8 @@ SYSTEM_PROMPT = (
     "You are given VERIFIED FACTS computed from the owner's own records. Rules you must never break: "
     "use ONLY the numbers and statements in the facts; never invent, estimate, or extrapolate figures; "
     "if the facts say information is missing or insufficient, say so plainly; "
-    "keep the reply under 120 words, warm and plain — no jargon, no bullet lists unless the facts contain them."
+    "keep the reply under 120 words, warm and plain — no jargon, no bullet lists unless the facts contain them; "
+    "mirror the owner's language — reply in English, Krio, or their mix exactly as they wrote, keeping every figure verbatim as given in the facts."
 )
 
 

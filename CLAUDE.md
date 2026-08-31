@@ -136,7 +136,19 @@ imports without a photo, never blocks); Product gains origin provenance
 (manual/photo/whatsapp — whatsapp is server-stamped only, clients may claim
 manual|photo) + created_at; review sheet shows found/new/matched counts;
 product detail shows the origin line.
-66 unit + 78 Playwright E2E green (vs mock AND real backend); 91 backend tests.
+Partner AI + Krio intelligence (owner brief): ai/lang.py — configurable
+Krio/business normalization vocabulary (phrase + token maps, growable, meaning-
+preserving) applied before intent routing, so English/Krio/mixed questions
+route identically; product mentions outrank the compare intent; conversation
+context (§11) — the partner reply stores "product:<id>" in AIMessage.intent
+and short follow-ups ("Why?", "how much I make from am?") deterministically
+inherit the previous subject via evidence.resolve_context (API still exposes
+the clean intent name); Anthropic prompt now mirrors the owner's language
+(figures verbatim); capture gains conversational completion — a bare
+number/number-word ("3"/"three"/"tri") answers a pending "how many?" by
+re-running the FULL interpreter on a synthesized phrase (all validation still
+applies). Mock partner has full parity (normalizeQ + lastContext).
+66 unit + 79 Playwright E2E green (vs mock AND real backend); 96 backend tests.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable

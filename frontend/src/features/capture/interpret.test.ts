@@ -347,3 +347,22 @@ describe("validation — never invent, never silently accept", () => {
     expect(r.totalMinor).toBe(1_050_00);
   });
 });
+
+// --- Conversational completion helper (Partner/Krio milestone §5/§7) ---
+import { parseBareQuantity } from "./interpret";
+
+describe("parseBareQuantity", () => {
+  it("accepts digits and number words in English and Krio", () => {
+    expect(parseBareQuantity("3")).toBe(3);
+    expect(parseBareQuantity("Three.")).toBe(3);
+    expect(parseBareQuantity("tri")).toBe(3);
+    expect(parseBareQuantity("fo")).toBe(4);
+    expect(parseBareQuantity(" ten ")).toBe(10);
+  });
+  it("rejects anything that is not just a quantity", () => {
+    expect(parseBareQuantity("3 bags")).toBeNull();
+    expect(parseBareQuantity("sold 3")).toBeNull();
+    expect(parseBareQuantity("0")).toBeNull();
+    expect(parseBareQuantity("hello")).toBeNull();
+  });
+});

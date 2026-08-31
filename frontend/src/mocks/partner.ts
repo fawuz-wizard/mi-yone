@@ -39,9 +39,35 @@ function productTokens(p: Product): Set<string> {
   return new Set(tokens(p.name).filter((t) => t.length >= 3 && !/^\d/.test(t)));
 }
 
+
+// MOCK parity with backend ai/lang.py — Krio/business normalization applied
+// before routing so English, Krio, and mixed questions route identically.
+const PHRASE_MAP: [string, string][] = [
+  ["dey go", "doing"], ["de go", "doing"], ["dey do", "doing"], ["de do", "doing"], ["dey waka", "doing"],
+  ["sell pass", "best selling"], ["sel pass", "best selling"], ["sell pas", "best selling"],
+  ["don go down", "decreased"], ["don drop", "dropped"], ["go down", "down"],
+  ["make am", "make it"], ["from am", "from it"], ["pan am", "on it"],
+  ["na how much", "is how much"], ["owe me", "owes me"],
+];
+const TOKEN_MAP: Record<string, string> = {
+  wetin: "what", watin: "what", uden: "who", udat: "who", aw: "how", moni: "money",
+  bisness: "business", bizness: "business", dis: "this", dat: "that", las: "last",
+  mun: "month", wik: "week", na: "is", don: "", dey: "", de: "", fo: "for", pan: "on",
+  am: "it", ah: "i", a: "i", sel: "sell", spen: "spend", lef: "left", pas: "most",
+  kompia: "compare", kredit: "credit", kustoma: "customer", stok: "stock", prodok: "product",
+};
+function normalizeQ(text: string): string {
+  let t = " " + text.toLowerCase().trim() + " ";
+  for (const [phrase, repl] of [...PHRASE_MAP].sort((x, y) => y[0].length - x[0].length)) {
+    t = t.split(" " + phrase + " ").join(" " + repl + " ").split(" " + phrase + "?").join(" " + repl + "?");
+  }
+  const words = t.replace(/[^a-z0-9]+/g, " ").split(" ").filter(Boolean);
+  return words.map((w) => (w in TOKEN_MAP ? TOKEN_MAP[w] : w)).filter(Boolean).join(" ");
+}
+
 function route(question: string): { intent: string; product: Product | null } {
-  const q = question.toLowerCase();
-  const words = new Set(tokens(question));
+  const q = normalizeQ(question);
+  const words = new Set(tokens(q));
   const has = (...ws: string[]) => ws.some((w) => words.has(w));
 
   // Best-score match: "palm oil" must beat "cooking oil" on the shared token.
@@ -55,8 +81,8 @@ function route(question: string): { intent: string; product: Product | null } {
     }
   }
   if (has("attention", "focus", "worry", "watch", "problem", "problems")) return { intent: "attention", product: null };
-  if (words.has("compare") || q.includes("last month") || q.includes(" vs ")) return { intent: "compare", product: null };
   if (matched) return { intent: "product", product: matched };
+  if (words.has("compare") || q.includes("last month") || q.includes(" vs ")) return { intent: "compare", product: null };
   if (has("profit", "keep", "kept") && has("why", "decrease", "decreased", "drop", "dropped", "down", "less", "fell", "fall"))
     return { intent: "profit_why", product: null };
   if (has("expense", "expenses", "spend", "spending", "spent", "cost", "costs")) return { intent: "expenses", product: null };
@@ -68,6 +94,8 @@ function route(question: string): { intent: string; product: Product | null } {
     return { intent: "overview", product: null };
   return { intent: "help", product: null };
 }
+
+let lastContext: { intent: string | null; product: Product | null } = { intent: null, product: null };
 
 const HELP_TEXT =
   'I can explain what’s in your business records. Try asking: "How is my business doing this month?", ' +
@@ -277,7 +305,23 @@ export function partnerHistory(): { messages: PartnerMessage[]; provider: string
 }
 
 export function partnerAsk(text: string): { owner: PartnerMessage; partner: PartnerMessage } {
-  const { intent, product } = route(text);
+  let { intent, product } = route(text);
+  // MOCK parity with backend resolve_context (§11): short follow-ups inherit
+  // the previous answer's subject.
+  const words = new Set(normalizeQ(text).split(" "));
+  const short = words.size <= 6;
+  const whyish = [...words].every((w) => ["why", "how", "come", "it", "that", "this", "so", "u", "say", "dat"].includes(w));
+  if (product === null && short) {
+    if (words.size > 0 && whyish) {
+      if (lastContext.product) { intent = "product"; product = lastContext.product; }
+      else if (["overview", "compare", "profit_why", "product"].includes(lastContext.intent ?? "")) intent = "profit_why";
+    } else if ((words.has("it") || words.has("that")) && lastContext.product) {
+      intent = "product"; product = lastContext.product;
+    } else if (intent === "help" && lastContext.product) {
+      intent = "product"; product = lastContext.product;
+    }
+  }
+  lastContext = { intent, product };
   let facts: string[];
   switch (intent) {
     case "overview": facts = overview(text); break;

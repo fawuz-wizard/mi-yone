@@ -23,7 +23,10 @@ class AskInput(BaseModel):
 
 
 def _msg_json(m: AIMessage) -> dict:
-    return {"id": m.id, "role": m.role, "text": m.text, "intent": m.intent, "created_at": m.created_at.isoformat()}
+    # Stored intent may carry conversation context ("product:<id>"); the API
+    # contract exposes the clean intent name only.
+    intent = m.intent.split(":", 1)[0] if m.intent else m.intent
+    return {"id": m.id, "role": m.role, "text": m.text, "intent": intent, "created_at": m.created_at.isoformat()}
 
 
 @router.get("/messages")
@@ -47,11 +50,29 @@ def ask(body: AskInput, ctx: TenantContext = Depends(tenant), db: Session = Depe
     if not question:
         raise ApiError(422, "VALIDATION_ERROR", "Ask me something about your business.")
 
-    intent, facts = build_reply_facts(db, ctx.business, question)
+    # Conversation context (§11): the previous answer's stored intent (and
+    # product, encoded as "product:<id>") lets short follow-ups like "why?"
+    # or "how much I make from am?" inherit their subject deterministically.
+    prev = db.scalar(
+        select(AIMessage)
+        .where(AIMessage.business_id == ctx.business.id, AIMessage.role == "partner")
+        .order_by(AIMessage.created_at.desc())
+        .limit(1)
+    )
+    prev_intent, prev_product_id = None, None
+    if prev is not None and prev.intent:
+        prev_intent = prev.intent
+        if prev.intent.startswith("product:"):
+            prev_intent, prev_product_id = "product", prev.intent.split(":", 1)[1]
+
+    intent, matched_product, facts = build_reply_facts(
+        db, ctx.business, question, prev_intent=prev_intent, prev_product_id=prev_product_id
+    )
     reply_text = get_provider().compose(question, facts)
 
+    stored_intent = f"product:{matched_product.id}" if matched_product is not None else intent
     owner_msg = AIMessage(id=gen_id("aim"), business_id=ctx.business.id, role="owner", text=question, intent=None)
-    partner_msg = AIMessage(id=gen_id("aim"), business_id=ctx.business.id, role="partner", text=reply_text, intent=intent)
+    partner_msg = AIMessage(id=gen_id("aim"), business_id=ctx.business.id, role="partner", text=reply_text, intent=stored_intent)
     db.add(owner_msg)
     db.add(partner_msg)
     audit(db, ctx.business.id, ctx.user.full_name, "partner.ask", "ai_message", partner_msg.id, intent)

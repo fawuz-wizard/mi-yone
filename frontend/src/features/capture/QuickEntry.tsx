@@ -17,7 +17,7 @@ import { ChipPicker } from "@/shared/design-system/ChipPicker";
 import { Button } from "@/shared/design-system/Button";
 import { isDomainError } from "@/shared/api/client";
 import type { Category, Customer, Product, Supplier, Transaction } from "@/shared/api/types";
-import { interpretEntry, type EntryIntent, type InterpretedEntry, type InterpretIssue } from "./interpret";
+import { interpretEntry, parseBareQuantity, type EntryIntent, type InterpretedEntry, type InterpretIssue } from "./interpret";
 import { useRecordDebt, useRecordPurchase } from "./api";
 
 // --- Minimal Web Speech typings (lib.dom has none for the webkit prefix) -----
@@ -90,6 +90,30 @@ export function QuickEntry({
       const trimmed = raw.trim();
       if (!trimmed) return;
       if (origin) originRef.current = origin;
+      // Conversational completion (§5/§7): the previous interpretation asked
+      // "how many?" — a bare number/number-word answers THAT question instead
+      // of starting over. The synthesized phrase re-runs the full interpreter,
+      // so every validation still applies; nothing is silently saved.
+      const bareQty = parseBareQuantity(trimmed);
+      if (
+        bareQty !== null &&
+        result &&
+        result.intent === "sale" &&
+        result.issues.some((i) => i.id === "missingQuantity")
+      ) {
+        const pendingProduct = products.find((p) => p.id === result.productId);
+        if (pendingProduct) {
+          const unitWhole =
+            result.unitPriceMinor !== null && result.unitPriceMinor % 100 === 0 ? result.unitPriceMinor / 100 : null;
+          const phrase =
+            unitWhole !== null
+              ? `sold ${bareQty} ${pendingProduct.name} at ${unitWhole} each`
+              : `sold ${bareQty} ${pendingProduct.name}`;
+          setText(phrase);
+          interpret(phrase, "sale");
+          return;
+        }
+      }
       const r = interpretEntry(
         trimmed,
         {
@@ -113,7 +137,7 @@ export function QuickEntry({
       else if (stamped.intent === "expense") onApplyExpense(stamped);
       // purchase / receivable / payable / ambiguous render their own cards below
     },
-    [products, customers, suppliers, categories, recentTransactions, onApplySale, onApplyExpense],
+    [products, customers, suppliers, categories, recentTransactions, onApplySale, onApplyExpense, result],
   );
 
   const stopListening = useCallback(() => {

@@ -27,6 +27,7 @@ from ..serializers import stock_of
 from ..services import analytics
 from ..services.finance import visible_query
 from ..services.watch import compute_watch
+from .lang import normalize
 
 INTENTS = (
     "overview", "profit_why", "expenses", "top_products", "product",
@@ -46,9 +47,11 @@ def _product_tokens(p: Product) -> set[str]:
 
 def route(question: str, products: list[Product]) -> tuple[str, Product | None]:
     """Deterministic intent router. Product mentions win over generic intents so
-    'how much did I make from rice' lands on the product, not the overview."""
-    q = question.lower()
-    words = set(_tokens(question))
+    'how much did I make from rice' lands on the product, not the overview.
+    Krio is first-class: the question is normalized (ai/lang.py vocabulary)
+    before routing, so English, Krio, and mixed phrasing route identically."""
+    q = normalize(question)
+    words = set(_tokens(q))
 
     # Best-score match: "palm oil" must beat "cooking oil" on the shared token.
     matched: Product | None = None
@@ -61,10 +64,12 @@ def route(question: str, products: list[Product]) -> tuple[str, Product | None]:
 
     if any(w in words for w in ("attention", "focus", "worry", "watch", "problem", "problems")):
         return "attention", None
-    if "compare" in words or "last month" in q or " vs " in q:
-        return "compare", None
+    # A named product outranks the generic compare intent: "how rice dey do
+    # compared to last month" is a question about RICE, answered with its data.
     if matched is not None:
         return "product", matched
+    if "compare" in words or "last month" in q or " vs " in q:
+        return "compare", None
     if any(w in words for w in ("profit", "keep", "kept")) and any(w in words for w in ("why", "decrease", "decreased", "drop", "dropped", "down", "less", "fell", "fall")):
         return "profit_why", None
     if any(w in words for w in ("expense", "expenses", "spend", "spending", "spent", "cost", "costs")):
@@ -291,29 +296,66 @@ HELP_TEXT = (
 )
 
 
-def build_reply_facts(db: Session, business: Business, question: str) -> tuple[str, list[str]]:
-    """Route the question and return (intent, grounded fact sentences)."""
+FOLLOWUP_PRONOUNS = {"it", "that", "this"}
+WHY_WORDS = {"why", "how", "come"}
+
+
+def resolve_context(
+    question: str, intent: str, product: Product | None,
+    prev_intent: str | None, prev_product: Product | None,
+) -> tuple[str, Product | None]:
+    """Conversation context (owner brief §11): a short follow-up inherits the
+    subject of the previous answer instead of forcing the owner to repeat the
+    whole question. Deterministic: only the STORED previous intent/product is
+    used — nothing is guessed."""
+    words = set(_tokens(normalize(question)))
+    short = len(words) <= 6
+    if product is not None or not short:
+        return intent, product  # the question stands on its own
+    # "Why?" after an answer → explain that subject.
+    if words and words <= (WHY_WORDS | FOLLOWUP_PRONOUNS | {"so", "u", "say", "dat"}):
+        if prev_product is not None:
+            return "product", prev_product
+        if prev_intent in ("overview", "compare", "profit_why", "product"):
+            return "profit_why", None
+    # Pronoun follow-up ("how much I make from it?") → the previous product.
+    if (words & FOLLOWUP_PRONOUNS) and prev_product is not None:
+        return "product", prev_product
+    # Unrecognized short question right after a product answer → that product.
+    if intent == "help" and prev_product is not None:
+        return "product", prev_product
+    return intent, product
+
+
+def build_reply_facts(
+    db: Session, business: Business, question: str,
+    prev_intent: str | None = None, prev_product_id: str | None = None,
+) -> tuple[str, Product | None, list[str]]:
+    """Route the question (with conversation context) and return
+    (intent, matched product, grounded fact sentences)."""
     products = list(db.scalars(select(Product).where(Product.business_id == business.id, Product.archived.is_(False))))
     intent, product = route(question, products)
+    prev_product = next((p for p in products if p.id == prev_product_id), None) if prev_product_id else None
+    intent, product = resolve_context(question, intent, product, prev_intent, prev_product)
     if intent == "overview":
-        return intent, _overview(db, business, question)
+        return intent, None, _overview(db, business, question)
     if intent == "profit_why":
-        return intent, _profit_why(db, business)
+        return intent, None, _profit_why(db, business)
     if intent == "expenses":
-        return intent, _expenses(db, business)
+        return intent, None, _expenses(db, business)
     if intent == "top_products":
-        return intent, _top_products(db, business)
+        return intent, None, _top_products(db, business)
     if intent == "product" and product is not None:
-        return intent, _product(db, business, product)
+        return intent, product, _product(db, business, product)
     if intent == "stock_why":
-        return intent, _stock_why(db, business)
+        return intent, None, _stock_why(db, business)
     if intent == "debts":
-        return intent, _debts(db, business)
+        return intent, None, _debts(db, business)
     if intent == "attention":
-        return intent, _attention(db, business)
+        return intent, None, _attention(db, business)
     if intent == "compare":
-        return intent, _compare(db, business)
-    return "help", [HELP_TEXT]
+        return intent, None, _compare(db, business)
+    return "help", None, [HELP_TEXT]
 
 
 def overview_line(db: Session, business: Business) -> dict | None:

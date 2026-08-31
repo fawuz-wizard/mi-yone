@@ -118,10 +118,19 @@ test("missing price: uses the product's own set price and says so", async ({ pag
 test("missing quantity: asks instead of guessing — Save stays disabled", async ({ page }) => {
   await signIn(page);
   await openSaleCapture(page);
-  await page.getByTestId("nlc-input").fill("sold rice at 400");
+  await page.getByTestId("nlc-input").fill("sold soap at 400");
   await page.getByTestId("nlc-fill").click();
   await expect(page.getByTestId("nlc-summary")).toContainText("How many were sold?");
   await expect(page.getByTestId("capture-save")).toBeDisabled(); // no amount → cannot record
+
+  // Conversational completion: answering JUST the asked question finishes the
+  // record — no need to repeat the whole sentence (Krio number words work too).
+  await page.getByTestId("nlc-input").fill("tri");
+  await page.getByTestId("nlc-fill").click();
+  await expect(page.getByTestId("nlc-summary")).toContainText("3 × Soap (bar)");
+  await expect(page.getByTestId("amount-display")).toContainText("1,200");
+  await page.getByTestId("capture-save").click();
+  await expect(page.getByTestId("toast")).toContainText("Saved · Le 1,200");
 });
 
 test("invalid input: flagged, nothing applied, nothing saveable", async ({ page }) => {

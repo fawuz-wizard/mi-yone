@@ -664,6 +664,23 @@ export function interpretSale(
   return interpretEntry(text, { products, customers }, "sale");
 }
 
+// A reply that is ONLY a quantity ("3", "three", "tri") — used by the quick
+// entry to complete a pending interpretation that asked "how many?", instead
+// of forcing the owner to repeat the whole sentence (owner brief §5/§7).
+const BARE_QTY_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  wan: 1, tu: 2, tri: 3, fo: 4, faiv: 5, fayv: 5, siks: 6, sevin: 7, nain: 9,
+};
+
+export function parseBareQuantity(text: string): number | null {
+  const t = text.trim().toLowerCase().replace(/[.!]$/, "");
+  if (/^\d{1,4}$/.test(t)) {
+    const n = Number(t);
+    return n >= 1 ? n : null;
+  }
+  return BARE_QTY_WORDS[t] ?? null;
+}
+
 export function hasBlockingIssues(r: InterpretedEntry): boolean {
   return r.issues.some((i) => i.severity === "block");
 }

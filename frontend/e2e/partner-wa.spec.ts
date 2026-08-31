@@ -134,3 +134,24 @@ test("the loop: sell an imported product, then the Partner explains it from real
   await expect(reply).toContainText("Palm oil (1L)");
   await expect(reply).toContainText("Current stock: 8"); // 10 imported − 2 sold, verified
 });
+
+
+test("Partner understands Krio and follow-ups keep the subject", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Partner", exact: true }).click();
+  await expect(page.getByTestId("partner-input")).toBeVisible();
+
+  // Krio question routes to real business data — not the generic help reply.
+  await page.getByTestId("partner-input").fill("Which product sell pass?");
+  await page.getByTestId("partner-send").click();
+  await expect(page.getByTestId("partner-msg-reply").last()).not.toContainText("never make figures up");
+  await expect(page.getByTestId("partner-msg-reply").last()).toContainText(/sold|units|Le/);
+
+  // A product question, then a bare pronoun follow-up stays on that product.
+  await page.getByTestId("partner-input").fill("How rice dey do?");
+  await page.getByTestId("partner-send").click();
+  await expect(page.getByTestId("partner-msg-reply").last()).toContainText("Rice");
+  await page.getByTestId("partner-input").fill("How much I make from am?");
+  await page.getByTestId("partner-send").click();
+  await expect(page.getByTestId("partner-msg-reply").last()).toContainText("Rice");
+});
