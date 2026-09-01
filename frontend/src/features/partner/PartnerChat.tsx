@@ -296,9 +296,18 @@ function groupBySource(blocks: PartnerBlock[]): PartnerBlock[] {
 
 function AnswerBlock({ block, t }: { block: PartnerBlock; t: (id: string) => string }) {
   const edge =
-    block.source === "web" ? "border-l-info" : block.source === "guidance" ? "border-l-border" : "border-l-action";
+    block.source === "records" ? "border-l-action" : block.source === "web" ? "border-l-info" : "border-l-border";
+  // A "note" is the Partner describing its own limits. It is not a knowledge
+  // claim, so it carries NO provenance label — labelling it "From your records"
+  // said the opposite of the truth.
   const label =
-    block.source === "web" ? t("partner.fromWebPlain") : block.source === "guidance" ? t("partner.fromGuidance") : t("partner.fromRecords");
+    block.source === "records"
+      ? t("partner.fromRecords")
+      : block.source === "guidance"
+        ? t("partner.fromGuidance")
+        : block.source === "web"
+          ? t("partner.fromWebPlain")
+          : null;
   return (
     <div data-testid={`partner-block-${block.source}`}>
       <div className={`money whitespace-pre-line rounded-card border border-l-[3px] border-border ${edge} bg-surface px-3 py-2 text-sm text-text-primary`}>

@@ -36,6 +36,8 @@ test("advice combines the owner's records with guidance — each labelled separa
   await expect(reply.getByTestId("partner-block-guidance").first()).toBeVisible();
   await expect(reply).toContainText("From your records");
   await expect(reply).toContainText("General business guidance");
+  // The Partner's own "ask me to research it" note is not a record.
+  await expect(reply.getByTestId("partner-block-note")).not.toContainText("From your records");
   // Guidance is practice, not market claims.
   await expect(reply.getByTestId("partner-block-guidance").first()).not.toContainText("%");
 });
@@ -70,7 +72,12 @@ test("market research is honestly unavailable — no invented prices, no fake so
   await expect(reply.getByTestId("partner-sources")).toHaveCount(0);
   await expect(reply.getByTestId("partner-block-web")).toHaveCount(0);
   // Saying "I can't" is a note about the Partner, not guidance dressed up.
-  await expect(reply.getByTestId("partner-block-note")).toBeVisible();
+  const note = reply.getByTestId("partner-block-note");
+  await expect(note).toBeVisible();
+  // And it carries NO provenance label — it is not a knowledge claim. This
+  // caught a real defect: the note was labelled "From your records".
+  await expect(note).not.toContainText("From your records");
+  await expect(note).not.toContainText("General business guidance");
 });
 
 test("an unanswerable market question still offers what the records DO know", async ({ page }) => {
