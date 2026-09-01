@@ -937,6 +937,9 @@ export function createSale(input: CreateSaleInput, idempotencyKey: string | null
   // multi-item checkout already made — a shop cannot sell what it does not have.
   const saleId = id("s");
   const product = getProductRow(input.product_id);
+  // MOCK parity with backend trade.create_sale: naming a product that is not
+  // in the records is refused, never recorded as a sale with no product.
+  if (input.product_id && !product) return null;
   if (product && product.track) {
     const qty = input.quantity ?? 1;
     if (qty > stockOf(product.id)) return null;

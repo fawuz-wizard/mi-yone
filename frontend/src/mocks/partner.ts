@@ -121,8 +121,30 @@ function tokens(text: string): string[] {
     .filter(Boolean);
 }
 
+// MOCK parity with backend evidence._product_tokens: "50kg" and "5l" identify
+// a product and are kept; a bare number is a price or a quantity.
 function productTokens(p: Product): Set<string> {
-  return new Set(tokens(p.name).filter((t) => t.length >= 3 && !/^\d/.test(t)));
+  return new Set(tokens(p.name).filter((t) => t.length >= 2 && !/^\d+$/.test(t)));
+}
+
+/** MOCK parity with backend evidence._match_product. A tie goes to the product
+ *  the question covers most completely — one word out of one beats one out of
+ *  three — so "QA Rice" is not answered with "Rice (50kg bag)". */
+function bestProduct(words: Set<string>, list: Product[]): Product | null {
+  let matched: Product | null = null;
+  let best: [number, number, number] = [0, 0, -1e9];
+  for (const p of list) {
+    const toks = [...productTokens(p)];
+    if (toks.length === 0) continue;
+    const hits = toks.filter((t) => words.has(t)).length;
+    if (hits === 0) continue;
+    const score: [number, number, number] = [hits, hits / toks.length, -p.name.length];
+    if (score[0] > best[0] || (score[0] === best[0] && (score[1] > best[1] || (score[1] === best[1] && score[2] > best[2])))) {
+      best = score;
+      matched = p;
+    }
+  }
+  return matched;
 }
 
 
@@ -147,16 +169,7 @@ function route(question: string): { intent: string; product: Product | null } {
   const words = new Set(tokens(q));
   const has = (...ws: string[]) => ws.some((w) => words.has(w));
 
-  // Best-score match: "palm oil" must beat "cooking oil" on the shared token.
-  let matched: Product | null = null;
-  let best = 0;
-  for (const p of listProducts(false)) {
-    const score = [...productTokens(p)].filter((t) => words.has(t)).length;
-    if (score > best) {
-      best = score;
-      matched = p;
-    }
-  }
+  const matched = bestProduct(words, listProducts(false));
   if (has("attention", "focus", "worry", "watch", "problem", "problems")) return { intent: "attention", product: null };
   if (matched) return { intent: "product", product: matched };
   if (words.has("compare") || q.includes("last month") || q.includes(" vs ")) return { intent: "compare", product: null };
@@ -189,7 +202,7 @@ function overview(question: string): string[] {
     ];
   }
   const facts = [
-    `From your records ${label}: money in ${r.cash.money_in.display}, money out ${r.cash.money_out.display}, left over ${r.cash.left_over.display}, across ${r.sales.count} sales.`,
+    `From your records ${label}: money in ${r.cash.money_in.display}, money out ${r.cash.money_out.display}, left over ${r.cash.left_over.display}, across ${r.sales.count} sale${r.sales.count !== 1 ? "s" : ""}.`,
     `Estimated profit ${label} (including credit you extended): ${r.profit.profit.display}.`,
   ];
   const s = computeTrends("30d").metrics.find((m) => m.key === "sales");
@@ -514,12 +527,7 @@ export function partnerAsk(text: string, mode: "auto" | "business" | "research" 
     blocks = researchBlocks(normalized);
   } else if (lane === "advice" || lane === "decision") {
     answerMode = "advice";
-    let matched: Product | null = null;
-    let best = 0;
-    for (const p of listProducts(false)) {
-      const score = [...productTokens(p)].filter((t) => words.has(t)).length;
-      if (score > best) { best = score; matched = p; }
-    }
+    let matched = bestProduct(words, listProducts(false));
     if (!matched) matched = lastContext.product;
     product = matched;
     intent = lane === "decision" ? "decision" : "advice";

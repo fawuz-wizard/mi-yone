@@ -46,6 +46,11 @@ def create_sale(
     product = None
     if product_id:
         product = db.scalar(select(Product).where(Product.id == product_id, Product.business_id == business_id))
+        if product is None:
+            # Silently dropping the product left a sale with no product link and
+            # stock that never moved — the owner would see the money and wonder
+            # why the shelf count never changed. checkout already refused this.
+            raise ApiError(422, "VALIDATION_ERROR", "That product is not in your records.")
     if product and product.track_inventory:
         # The same hard stock check the multi-item checkout path already made.
         # Both sale paths must refuse to sell what the records say isn't there.

@@ -75,8 +75,12 @@ def test_watch_integration_answers_attention(client):
 
 
 def test_trends_integration_in_overview(client):
+    # Dated TODAY, not "2 days ago": "this month" is calendar month-to-date, so
+    # a record 2 days old falls in the previous month on the 1st and 2nd and the
+    # test failed on those two days a month. The behaviour under test is the
+    # trends line, not the calendar.
     _tx(client, "INCOME", 100_000_00, 40)  # history exists
-    _tx(client, "INCOME", 150_000_00, 2)
+    _tx(client, "INCOME", 150_000_00, 0)
     d = _ask(client, "How is my business doing this month?")
     assert "Compared with the 30 days before" in d["text"]
 

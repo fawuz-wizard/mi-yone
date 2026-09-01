@@ -87,16 +87,30 @@ def _tokens(text: str) -> list[str]:
 
 
 def _product_tokens(p: Product) -> set[str]:
-    return {t for t in _tokens(p.name) if len(t) >= 3 and not t[0].isdigit()}
+    # "50kg" and "5l" distinguish one product from another and are kept; a bare
+    # number ("350") is a price or a quantity, never part of the identity.
+    return {t for t in _tokens(p.name) if len(t) >= 2 and not t.isdigit()}
 
 
 def _match_product(words: set[str], products: list[Product]) -> Product | None:
     """Best-score product match: 'palm oil' must beat 'cooking oil' on the
-    shared token. One rule, used by every lane."""
+    shared token. One rule, used by every lane.
+
+    Ties used to be settled by whichever product the database returned first,
+    so a question about "QA Rice" could be answered about "Rice (50kg bag)".
+    A tie now goes to the product the question covers most completely: one
+    matched word out of one beats one out of three."""
+    best: tuple[int, float, int] = (0, 0.0, -10**9)
     matched: Product | None = None
-    best = 0
     for p in products:
-        score = len(_product_tokens(p) & words)
+        tokens = _product_tokens(p)
+        if not tokens:
+            continue
+        hits = len(tokens & words)
+        if hits == 0:
+            continue
+        # more matched words, then better coverage, then the shorter name
+        score = (hits, hits / len(tokens), -len(p.name))
         if score > best:
             best = score
             matched = p
@@ -169,7 +183,8 @@ def _overview(db: Session, business: Business, question: str) -> list[str]:
         return [f"I don't have any money records for {label} yet, so I can't describe performance. Record a few sales and expenses and I'll have something real to work with."]
     facts = [
         f"From your records {label}: money in {r['cash']['money_in']['display']}, money out {r['cash']['money_out']['display']}, "
-        f"left over {r['cash']['left_over']['display']}, across {r['sales']['count']} sales.",
+        f"left over {r['cash']['left_over']['display']}, across {r['sales']['count']} "
+        f"sale{'s' if r['sales']['count'] != 1 else ''}.",
         f"Estimated profit {label} (including credit you extended): {r['profit']['profit']['display']}.",
     ]
     t = {m["key"]: m for m in analytics.trends(db, business.id, "30d")["metrics"]}

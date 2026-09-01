@@ -28,8 +28,16 @@ def utc(dt: datetime) -> datetime:
 
 
 def days_ago(n: int, hour: int = 10) -> datetime:
-    d = datetime.now(timezone.utc) - timedelta(days=n)
-    return d.replace(hour=hour % 24, minute=30, second=0, microsecond=0)
+    """A past timestamp, never a future one.
+
+    Pinning today's records to a fixed hour meant that seeding before that hour
+    dated them in the FUTURE, so they fell outside every window: Home's default
+    "Today" read Le 0, and on the 1st of a month the whole month read Le 0 while
+    the same week showed a healthy business. Demo data must never be ahead of
+    the clock."""
+    now = datetime.now(timezone.utc)
+    d = (now - timedelta(days=n)).replace(hour=hour % 24, minute=30, second=0, microsecond=0)
+    return min(d, now - timedelta(minutes=5))
 
 
 def whole_le(minor: float) -> int:
@@ -157,6 +165,10 @@ def run() -> None:
 
         # Recent explicit rows (mock parity).
         tx(db, "INCOME", 4_500_000, "Sales", days_ago(0, 9), "SALE")
+        # One cost dated TODAY as well. Without it, a demo on the 1st of a
+        # month shows income and no expenses, so the month view reports a 100%
+        # margin — arithmetically right, and it looks like a broken number.
+        tx(db, "EXPENSE", 800_000, "Transport", days_ago(0, 8), "MANUAL", "Okada to market")
         tx(db, "INCOME", 12_000_000, "Sales", days_ago(1, 12), "SALE")
         tx(db, "EXPENSE", 3_500_000, "Stock purchase", days_ago(1, 8), "MANUAL", "Rice, 2 bags")
         tx(db, "INCOME", 8_000_000, "Sales", days_ago(3, 15), "SALE")
