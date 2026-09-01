@@ -98,23 +98,6 @@ authentication and no separation between businesses** and is for development and
 testing only. With neither set the app refuses to start rather than quietly
 serving an open API.
 
-### Demo fallback bundle
-
-A self-contained build that runs with **no database, no backend, no internet
-and no `npm install`** — for when the normal stack cannot be trusted on the day:
-
-```bash
-cd frontend
-MIYONE_STANDALONE=on MIYONE_MOCK_API=on NEXT_PUBLIC_MIYONE_SCAN=on npm run build
-# assemble the portable folder
-cp -a .next/standalone ../demo-app && cp -a .next/static ../demo-app/.next/static
-# run it anywhere with Node 18+
-cd ../demo-app && PORT=3000 node server.js
-```
-
-Records live in memory, so every restart is a clean, identical demo. It is for
-demonstrating only — never for real users.
-
 All AI/integration features degrade honestly when unconfigured — nothing is faked.
 
 | Variable | Effect when set |
