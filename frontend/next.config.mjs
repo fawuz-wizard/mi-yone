@@ -30,6 +30,10 @@ console.log(
 const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   poweredByHeader: false,
+  // Opt-in only (MIYONE_STANDALONE=on): emits a self-contained server with just
+  // the files it needs, so the demo bundle runs on a machine that has never run
+  // npm install and has no network. Normal builds are unaffected.
+  ...(process.env.MIYONE_STANDALONE === "on" ? { output: "standalone" } : {}),
   async rewrites() {
     if (!backend) return []; // explicitly opted into the MOCK
     return {
