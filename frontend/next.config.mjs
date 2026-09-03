@@ -1,5 +1,9 @@
 /** @type {import('next').NextConfig} */
-const backend = process.env.MIYONE_BACKEND_URL; // e.g. http://localhost:8000
+// Either a full URL (local: http://localhost:8000) or, on managed hosting, the
+// API's private host:port injected by the platform (render.yaml fromService).
+const backend =
+  process.env.MIYONE_BACKEND_URL ||
+  (process.env.MIYONE_BACKEND_HOSTPORT ? `http://${process.env.MIYONE_BACKEND_HOSTPORT}` : undefined);
 
 // The in-repo MOCK API accepts any session cookie and ignores the business id
 // entirely — it exists so the UI can be developed and tested without a

@@ -1,8 +1,21 @@
-"""Demo seed — drops and recreates the schema, then loads the demo business.
-Mirrors the frontend mock's seed so the SAME Playwright suite proves the real
-backend. Clearly demo data; run: python -m app.seed"""
-from datetime import datetime, timedelta, timezone
+"""Demo seed — DESTROYS the database it is pointed at, recreates the schema
+through Alembic, then loads the labelled demo business. Mirrors the frontend
+mock's seed so the SAME Playwright suite proves the real backend.
 
+This is demo/development tooling. It refuses to run against anything that is
+not explicitly a disposable database:
+
+    MIYONE_ENV=dev  python -m app.seed --i-understand-this-deletes-everything
+    MIYONE_ENV=demo python -m app.seed --i-understand-this-deletes-everything
+
+The tester/production database is NEVER seeded: its schema comes from
+`alembic upgrade head` and its data from real owners signing up."""
+import subprocess
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from .core.config import settings
 from .core.db import Base, SessionLocal, engine
 from .core.security import hash_password
 from .models import (
@@ -37,6 +50,8 @@ def days_ago(n: int, hour: int = 10) -> datetime:
     the clock."""
     now = datetime.now(timezone.utc)
     d = (now - timedelta(days=n)).replace(hour=hour % 24, minute=30, second=0, microsecond=0)
+    if n < 0:  # a deliberately FUTURE date (a due date not yet reached) must stay in the future
+        return d
     return min(d, now - timedelta(minutes=5))
 
 
@@ -90,9 +105,34 @@ def movement(db, product_id: str, type_: str, delta: int, unit_cost: int | None,
     )
 
 
-def run() -> None:
+SEED_FLAG = "--i-understand-this-deletes-everything"
+SEEDABLE_ENVS = ("dev", "demo")
+
+
+def guard(argv: list[str]) -> None:
+    """Two independent locks: the environment must be disposable AND the
+    operator must say out loud that they want the data gone."""
+    if settings.env not in SEEDABLE_ENVS:
+        sys.exit(
+            f"Refusing to seed: MIYONE_ENV={settings.env!r} is not one of {SEEDABLE_ENVS}. "
+            "The tester/production database is never seeded."
+        )
+    if SEED_FLAG not in argv:
+        sys.exit(f"Refusing to seed: this drops EVERY table. Re-run with {SEED_FLAG}")
+
+
+def reset_schema() -> None:
+    """Drop everything, then rebuild through the SAME path production uses, so
+    the demo database has exactly the schema a migrated database has."""
     Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+    backend_dir = Path(__file__).resolve().parents[1]
+    subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=backend_dir, check=True)
+
+
+def run() -> None:
+    reset_schema()
     with SessionLocal() as db:
         user = User(id="u-demo-1", email="mariama@example.sl", password_hash=hash_password("demo-password"), full_name=ACTOR)
         db.add(user)
@@ -182,4 +222,5 @@ def run() -> None:
 
 
 if __name__ == "__main__":
+    guard(sys.argv[1:])
     run()

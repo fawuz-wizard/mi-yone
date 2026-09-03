@@ -5,3 +5,10 @@ playwright-report/
 *.log
 .env
 *.tsbuildinfo
+backend/var/
+backend/backups/
+backups/
+*.dump
+*.dump.sha256
+.venv/
+__pycache__/

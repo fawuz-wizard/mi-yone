@@ -2,6 +2,9 @@
   "name": "mi-yone-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "tokens": "node scripts/build-tokens.mjs",
     "predev": "npm run tokens",

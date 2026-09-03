@@ -7,5 +7,7 @@ import path from "node:path";
 export default function globalSetup() {
   if (!process.env.MIYONE_BACKEND_URL) return; // mock mode: nothing to do
   const backendDir = path.resolve(__dirname, "../../backend");
-  execSync("python3 -m app.seed", { cwd: backendDir, stdio: "inherit" });
+  // The seed drops every table first and refuses without this flag (and outside
+  // MIYONE_ENV=dev|demo) — the E2E suite only ever targets a development database.
+  execSync("python3 -m app.seed --i-understand-this-deletes-everything", { cwd: backendDir, stdio: "inherit" });
 }

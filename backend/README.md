@@ -17,8 +17,15 @@ FastAPI + PostgreSQL modular monolith per the Phase 2 (Rev 2) architecture.
 ```bash
 pip install -r requirements.txt
 # PostgreSQL: role miyone / db miyone (see app/core/config.py or MIYONE_DATABASE_URL)
-python -m app.seed              # drops + recreates schema, loads the demo business
+alembic upgrade head            # creates / updates the schema — the ONLY way, everywhere
 uvicorn app.main:app --port 8000
+```
+
+Demo data (development only — this DROPS every table first, then rebuilds the
+schema through Alembic and loads the labelled demo business):
+
+```bash
+python -m app.seed --i-understand-this-deletes-everything   # refuses unless MIYONE_ENV is dev or demo
 ```
 
 Frontend against this backend:
@@ -34,16 +41,31 @@ Demo login: `mariama@example.sl` / `demo-password`.
 ## Tests
 
 ```bash
-python -m pytest tests/   # needs db miyone_test; 14 tests: financial core, trade/debts, auth+tenancy
+python -m pytest tests/   # needs db miyone_test — built ONCE per run by `alembic upgrade head`, never create_all
 ```
 
 The frontend's full Playwright suite (28 tests) passes unchanged against this
 backend — run it with `MIYONE_BACKEND_URL` set as above.
 
+## Schema changes
+
+```bash
+# edit app/models.py, then:
+alembic revision --autogenerate -m "what changed"   # read the generated file
+alembic upgrade head
+python -m pytest tests/                              # includes `alembic check` (drift = failure)
+```
+
+`/readiness` (and `/api/v1/system/readiness` through the frontend proxy) answers
+503 until the database is reachable AND at the migration head.
+
+## Operations
+
+- `ops/backup.sh`, `ops/restore.sh`, `ops/rowcounts.sh`, `ops/RESTORE-DRILL.md` — logical backup into a file you hold, restore into a scratch database, verified.
+- `python -m app.ops set-password <identifier>` — manual password reset for testers (no email feature exists); signs out their sessions.
+- `python -m app.ops list-users`
+- Deployment: `../render.yaml` + `../docs/deployment.md`.
+
 ## Known gaps (tracked, deliberate)
 
-- **Alembic**: schema is created via metadata (`app/seed.py`) for the demo; the
-  versioned initial migration must land before any production deploy (Phase 2 §27).
-- Registration exists (`/auth/register`) but the setup-flow UI is a later milestone.
-- Rate limiting, email verification/reset transport, audit query API: Phase 2
-  hardening items, not yet wired.
+- Email verification/reset transport, audit query API: post-hackathon.

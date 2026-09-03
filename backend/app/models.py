@@ -157,6 +157,11 @@ class StockMovement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)  # when ENTERED (vs occurred)
     recorded_by: Mapped[str] = mapped_column(String(120))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    __table_args__ = (
+        # The same database-level guarantee transactions and sales have: a retry
+        # that races its own first attempt cannot create two purchases.
+        Index("uq_movement_idempotency", "business_id", "idempotency_key", unique=True, postgresql_where=(idempotency_key.isnot(None))),
+    )
 
 
 class Party(Base):
@@ -189,7 +194,10 @@ class Debt(Base):
     idempotency_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)  # when ENTERED (vs since)
     entry_method: Mapped[str] = mapped_column(String(8), default="manual")  # manual/text/voice/scan
-    __table_args__ = (CheckConstraint("settled_minor <= amount_minor", name="ck_debt_no_oversettle"),)
+    __table_args__ = (
+        CheckConstraint("settled_minor <= amount_minor", name="ck_debt_no_oversettle"),
+        Index("uq_debt_idempotency", "business_id", "idempotency_key", unique=True, postgresql_where=(idempotency_key.isnot(None))),
+    )
 
 
 class Sale(Base):

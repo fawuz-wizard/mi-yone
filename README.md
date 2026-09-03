@@ -26,7 +26,8 @@ businesses in Sierra Leone. Built for the Orange Summer Challenge
 ```bash
 cd backend
 pip install -r requirements.txt
-python -m app.seed          # creates tables + labeled demo data (run once, or to reset)
+alembic upgrade head        # creates the schema (the only way — also how production does it)
+python -m app.seed --i-understand-this-deletes-everything   # OPTIONAL demo data; drops everything first; dev/demo only
 uvicorn app.main:app --port 8000
 ```
 
@@ -58,6 +59,13 @@ npm run dev
 ```
 
 Open http://localhost:3000.
+
+## Deployment
+
+`render.yaml` describes the tester environment (Render: public Next.js service →
+private FastAPI service → managed PostgreSQL, persistent disk for photos).
+`docs/deployment.md` is the operating manual: env vars, first deployment,
+tester onboarding, monitoring, backup/restore drill.
 
 ## Testing voice and QR scanning
 

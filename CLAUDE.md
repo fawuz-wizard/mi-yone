@@ -227,18 +227,45 @@ P0 RELIABILITY HARDENING (owner brief — feature freeze, stabilise what exists)
    retries on a timer as well as the `online` event, pending items show their
    amount, and the copy no longer promises durability it does not have.
 78 unit + 96 Playwright E2E green (vs mock AND real backend); 136 backend tests.
+DEPLOYMENT PHASE (owner brief — scope frozen, deploy what exists):
+- SCHEMA = ALEMBIC ONLY. `backend/alembic/` with `0001_initial_schema`
+  (reviewed autogenerate; adds the two partial unique indexes
+  uq_movement_idempotency / uq_debt_idempotency the other ledgers already had).
+  The startup ADDITIVE shim is GONE. Production/tester schema is created and
+  changed by `alembic upgrade head` (render.yaml preDeployCommand) and by
+  nothing else. `core/schema.py` compares the DB revision with the code's head;
+  `/readiness` + `/api/v1/system/readiness` answer 503 (reason database|schema)
+  until both are right. Tests build miyone_test ONCE per run via alembic and
+  TRUNCATE between tests; `tests/test_deployment.py` runs `alembic check`, so
+  a model change without a migration FAILS the suite. Schema change ritual:
+  edit models → `alembic revision --autogenerate` → read it → upgrade → suite.
+- SEED IS GUARDED: `python -m app.seed --i-understand-this-deletes-everything`
+  and only when MIYONE_ENV is dev|demo. The tester database is NEVER seeded.
+  Downgrading 0001 is refused outside dev|demo.
+- ERRORS/LOGS: the catch-all handler logs the traceback under the SAME
+  request_id the client receives (request.state.request_id, X-Request-Id);
+  log lines carry timestamp + level; IntegrityError logs the constraint name.
+- OPS TOOLING (no UI, not product): `app/ops.py` set-password / list-users;
+  `ops/backup.sh` `ops/restore.sh` (refuses non-scratch targets)
+  `ops/rowcounts.sh` `ops/RESTORE-DRILL.md`. Reference drill PASSED locally.
+- PLATFORM: `render.yaml` (public Next web + PRIVATE FastAPI pserv, Frankfurt,
+  1 instance / 1 worker, persistent disk /var/data for MIYONE_UPLOAD_DIR,
+  managed Postgres 16 paid plan; secrets sync:false). next.config accepts
+  MIYONE_BACKEND_HOSTPORT (platform-injected) as well as MIYONE_BACKEND_URL.
+  Pins: requirements.txt exact versions, .python-version 3.11.15, Node 22.
+  Manual: docs/deployment.md.
 
 Backend done (`backend/`): FastAPI + PostgreSQL per Phase 2 — opaque sessions
 (argon2id, hashed tokens), tenant guard (cross-tenant = 404, tested), immutable
 ledger with idempotency + reversal/fix, stock movement ledger, parties, sales
 orchestration, debts/settlements, LIVE analytics (dashboard/performance/reports),
-server-side CSV. 14 pytest green. Seed: `python -m app.seed`
+server-side CSV. Schema: `alembic upgrade head`. Demo seed (dev/demo only):
+`python -m app.seed --i-understand-this-deletes-everything`
 (mariama@example.sl / demo-password). Frontend proxies /api/v1 to it when
 `MIYONE_BACKEND_URL` is set (unset = in-repo mock for dev). The FULL Playwright
 suite passes unchanged against the real backend — keep it that way.
 
-Not built yet: Alembic initial migration (required before production deploy),
-email transport, durable offline queue (GATED on approved technical design — do
+Not built yet: email transport, durable offline queue (GATED on approved technical design — do
 not build it), async research jobs (deliberately deferred: research is
 synchronous and lives in the conversation feed; Phase 2's research_requests
 status machine is not built until a real worker exists). Open owner decisions:

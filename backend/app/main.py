@@ -2,17 +2,45 @@
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from .core import schema
 from .core.config import settings
-from .core.db import SessionLocal
+from .core.db import engine
 from .core.envelope import install_handlers, ok
 from .routers import analytics_r, auth, finance_r, integrations_r, parties_r, partner_r, settings_r, stock_r, trade_r
 
 logger = logging.getLogger("miyone")
-logging.basicConfig(level=logging.INFO, format="%(message)s")
+# One line per event, timestamp + level first so a platform log viewer can
+# filter on them; the message itself stays a compact JSON object. Never bodies,
+# never tokens, never financial detail (Phase 2 §26).
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Startup: report the schema version. The schema is created and changed
+    ONLY by `alembic upgrade head` — the application never alters it. If the
+    database is behind, the process still starts (so its logs are visible)
+    but /readiness answers 503 until a migration is applied."""
+    try:
+        with engine.connect() as conn:
+            st = schema.status(conn)
+        if st.at_head:
+            logger.info('{"startup":"schema","revision":"%s","at_head":true}', st.current)
+        else:
+            logger.error(
+                '{"startup":"schema","revision":"%s","expected":"%s","at_head":false,'
+                '"action":"run: alembic upgrade head"}', st.current, st.head,
+            )
+    except Exception as exc:  # noqa: BLE001 — a dead database at boot is reported, not hidden
+        logger.error('{"startup":"schema","error":"%s"}', type(exc).__name__)
+    yield
+
 
 # The interactive docs map every endpoint and schema. Useful in development,
 # an invitation outside it.
@@ -22,18 +50,23 @@ app = FastAPI(
     version="0.1.0",
     docs_url="/api/docs" if _docs else None,
     openapi_url="/api/openapi.json" if _docs else None,
+    lifespan=lifespan,
 )
 install_handlers(app)
 
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
-    """Request-id + structured log line + security headers on every response."""
+    """Request-id + structured log line + security headers on every response.
+
+    The id is minted BEFORE the handler runs and stored on request.state, so an
+    error envelope carries the same id as the log line — a tester's screenshot
+    of "request_id: req-…" leads straight to the server log."""
     request_id = f"req-{uuid.uuid4().hex[:10]}"
+    request.state.request_id = request_id
     start = time.monotonic()
     response = await call_next(request)
     duration_ms = round((time.monotonic() - start) * 1000, 1)
-    # Structured log: never bodies, never tokens, never financial detail (Phase 2 §26).
     logger.info(
         '{"request_id":"%s","method":"%s","path":"%s","status":%d,"ms":%s}',
         request_id, request.method, request.url.path, response.status_code, duration_ms,
@@ -44,49 +77,6 @@ async def request_context(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Cache-Control"] = "no-store"  # financial responses are never cached
     return response
-
-# Pre-Alembic additive shim: bring existing databases up to the current model
-# for NEW OPTIONAL columns only (never drops, never rewrites, safe to re-run).
-# Real migrations move to Alembic before production deploy (already on the plan).
-_ADDITIVE_COLUMNS = (
-    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS entry_method VARCHAR(8) NOT NULL DEFAULT 'manual'",
-    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
-    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS entry_method VARCHAR(8) NOT NULL DEFAULT 'manual'",
-    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
-    "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
-    # Older rows predate the recorded-at column: the honest backfill is the
-    # event time itself (we know nothing later than that).
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS origin VARCHAR(12) NOT NULL DEFAULT 'manual'",
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
-    "ALTER TABLE products ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
-    "ALTER TABLE catalog_import_items ADD COLUMN IF NOT EXISTS external_id VARCHAR(80)",
-    "ALTER TABLE businesses ADD COLUMN IF NOT EXISTS alert_prefs VARCHAR(200)",
-    "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS mode VARCHAR(10) NOT NULL DEFAULT 'business'",
-    "ALTER TABLE ai_messages ADD COLUMN IF NOT EXISTS blocks_json TEXT",
-    # Whole-sale reversal: sales, debts and stock movements become reversible
-    # the same way transactions already were.
-    "ALTER TABLE sales ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'POSTED'",
-    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'POSTED'",
-    "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'POSTED'",
-    "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS sale_id VARCHAR(40)",
-    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS debt_id VARCHAR(40)",
-    "ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(80)",
-    "ALTER TABLE debts ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(80)",
-    "UPDATE debts SET created_at = since WHERE created_at IS NULL",
-    "UPDATE sales SET created_at = occurred_at WHERE created_at IS NULL",
-    "UPDATE inventory_movements SET created_at = occurred_at WHERE created_at IS NULL",
-)
-
-
-@app.on_event("startup")
-def apply_additive_columns() -> None:
-    try:
-        with SessionLocal() as db:
-            for stmt in _ADDITIVE_COLUMNS:
-                db.execute(text(stmt))
-            db.commit()
-    except Exception:  # fresh/empty database: the seed creates the current schema
-        logger.info('{"startup":"additive-columns skipped (no schema yet)"}')
 
 
 API = "/api/v1"
@@ -101,13 +91,42 @@ app.include_router(integrations_r.router, prefix=API)
 app.include_router(settings_r.router, prefix=API)
 
 
+# --- Liveness / readiness -----------------------------------------------------
+# /health: the process is up (platform liveness).
+# /readiness: the process can serve — database reachable AND schema at the
+#   migration head. 503 otherwise, so the platform never routes traffic to a
+#   deploy whose migration has not been applied.
+# /api/v1/system/readiness: the same check reachable through the public
+#   hostname and the frontend proxy, so one URL proves browser → Next → API → DB.
+
+
 @app.get("/health")
 def health():
     return ok({"status": "up"})
 
 
+def _readiness() -> JSONResponse:
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+            st = schema.status(conn)
+    except Exception as exc:  # noqa: BLE001
+        logger.error('{"readiness":"database_unreachable","error":"%s"}', type(exc).__name__)
+        return JSONResponse({"success": False, "data": {"status": "not-ready", "reason": "database"}}, status_code=503)
+    if not st.at_head:
+        logger.error('{"readiness":"schema_behind","revision":"%s","expected":"%s"}', st.current, st.head)
+        return JSONResponse(
+            {"success": False, "data": {"status": "not-ready", "reason": "schema", "revision": st.current, "expected": st.head}},
+            status_code=503,
+        )
+    return ok({"status": "ready", "revision": st.current})
+
+
 @app.get("/readiness")
 def readiness():
-    with SessionLocal() as db:
-        db.execute(text("SELECT 1"))
-    return ok({"status": "ready"})
+    return _readiness()
+
+
+@app.get(f"{API}/system/readiness")
+def system_readiness():
+    return _readiness()

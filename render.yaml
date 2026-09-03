@@ -1,0 +1,104 @@
+# MI YONE — Render Blueprint (infrastructure as code).
+#
+# One public hostname. The Next.js web service is the only thing the internet
+# can reach; it proxies /api/v1/* to the FastAPI service over Render's private
+# network, exactly as the app already works locally. No CORS, no cross-origin
+# cookies, nothing in the frontend changes.
+#
+#   browser ──HTTPS──▶ miyone-web (Next.js, public)
+#                          │  /api/v1/*  (same-origin rewrite proxy)
+#                          ▼
+#                      miyone-api (FastAPI, PRIVATE — no public URL)
+#                          │  persistent disk /var/data  → product photos
+#                          ▼
+#                      miyone-db  (managed PostgreSQL 16)
+#
+# SECRETS ARE NOT IN THIS FILE. Every value marked `sync: false` is typed into
+# the Render dashboard when the blueprint is first applied, and never committed.
+#
+# Apply: Render Dashboard → Blueprints → New Blueprint Instance → this repo.
+# Full procedure, env var meanings, backup/restore and the tester procedure:
+# docs/deployment.md
+
+services:
+  # ---------------------------------------------------------------- API (private)
+  - type: pserv
+    name: miyone-api
+    runtime: python
+    region: frankfurt            # nearest Render region to Sierra Leone
+    plan: 0.5c-512mb
+    rootDir: backend
+    numInstances: 1              # REQUIRED: in-process rate limiter + local-disk photos assume ONE instance
+    autoDeployTrigger: off       # deploys are deliberate during the tester round (owner clicks Deploy)
+    buildCommand: pip install -r requirements.txt
+    # The schema is created and updated ONLY here. Runs after build, before
+    # start; if it fails the deploy fails and the previous version keeps serving.
+    preDeployCommand: alembic upgrade head
+    # One worker (see numInstances). --proxy-headers so rate limits see the
+    # real client IP that Render / the web service forward, not the proxy's.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips='*'
+    healthCheckPath: /readiness  # 503 until database reachable AND schema at migration head
+    disk:
+      name: miyone-uploads
+      mountPath: /var/data
+      sizeGB: 1                  # product photos; grow later without redeploying the code
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.15
+      - key: MIYONE_ENV
+        value: production        # forces Secure cookies, hides /api/docs, blocks the seed
+      - key: MIYONE_DATABASE_URL
+        fromDatabase:
+          name: miyone-db
+          property: connectionString
+      - key: MIYONE_COOKIE_SECURE
+        value: "true"
+      - key: MIYONE_UPLOAD_DIR
+        value: /var/data/uploads
+      - key: MIYONE_AI_PROVIDER
+        value: anthropic         # owner decision: real Partner AI for testers
+      - key: MIYONE_AI_API_KEY
+        sync: false              # SECRET — typed into the dashboard, never here
+      - key: MIYONE_AI_MODEL
+        value: claude-sonnet-4-5 # verify against the current model list when the key is set
+      - key: MIYONE_RESEARCH_PROVIDER
+        value: none              # owner decision: live market research OFF for the tester week
+      - key: MIYONE_WA_MODE
+        value: test              # labelled test adapter until Meta credentials exist
+      # MIYONE_WA_ACCESS_TOKEN / MIYONE_WA_BUSINESS_ACCOUNT_ID: add as sync:false
+      # secrets only when switching MIYONE_WA_MODE to live. Not before.
+
+  # ---------------------------------------------------------------- Web (public)
+  - type: web
+    name: miyone-web
+    runtime: node
+    region: frankfurt
+    plan: 0.5c-512mb
+    rootDir: frontend
+    autoDeployTrigger: off
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start -- --port $PORT
+    healthCheckPath: /welcome
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # The rewrite proxy target: the API service's PRIVATE host:port, injected
+      # by Render — nobody types it. next.config.mjs turns it into
+      # MIYONE_BACKEND_URL=http://<host>:<port>. Needed at BUILD time (Next bakes
+      # rewrites into the build) and at run time; Render provides it for both.
+      - key: MIYONE_BACKEND_HOSTPORT
+        fromService:
+          name: miyone-api
+          type: pserv
+          property: hostport
+      # NEXT_PUBLIC_MIYONE_SCAN deliberately NOT set: scan-to-sell stays locked
+      # ("Coming very soon") for testers, per the owner's testing-phase decision.
+      # MIYONE_MOCK_API must NEVER be set in any deployed environment.
+
+databases:
+  - name: miyone-db
+    region: frankfurt
+    plan: 0.1c-256mb             # smallest PAID plan: continuous backups + point-in-time recovery. Never `free` (no backups, expires).
+    postgresMajorVersion: "16"
+    databaseName: miyone
+    user: miyone
