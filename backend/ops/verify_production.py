@@ -210,7 +210,7 @@ def verify_data(c: Client, st: dict, label: str):
     s, r = c.call("GET", f"{A}/partner/messages")
     prov = (data(r) or {}).get("provider")
     research = (data(r) or {}).get("research_available")
-    check(f"{label} Partner provider = anthropic, research OFF", prov == "anthropic" and research is False, f"provider={prov} research_available={research}")
+    check(f"{label} Partner provider configured (local or anthropic), research OFF", prov in ("local", "anthropic") and research is False, f"provider={prov} research_available={research}")
     t0 = time.time()
     s, r = c.call("POST", f"{A}/partner/messages", {"text": "How is my business performing?"}, timeout=90)
     dt = round(time.time() - t0, 1)

@@ -37,9 +37,9 @@ Why one instance and one worker: the rate limiter is in-process and photos are o
 | `MIYONE_DATABASE_URL` | from `miyone-db` (internal connection string) | yes (injected) | The only database the API ever touches |
 | `MIYONE_COOKIE_SECURE` | `true` | no | Already forced by `MIYONE_ENV`; set explicitly so nobody wonders |
 | `MIYONE_UPLOAD_DIR` | `/var/data/uploads` | no | On the persistent disk — photos survive deploys and restarts |
-| `MIYONE_AI_PROVIDER` | `anthropic` | no | Real Partner AI for testers (owner decision) |
-| `MIYONE_AI_API_KEY` | *typed in dashboard* | **yes** | Never in the repo, never in logs |
-| `MIYONE_AI_MODEL` | `claude-sonnet-5` | no | Current Sonnet id per the official model list (verified 2026-09-03); re-check when Anthropic announces a new Sonnet |
+| `MIYONE_AI_PROVIDER` | `local` | no | First tester round uses the built-in composer (owner decision). Switch to `anthropic` later by adding the key below and restarting |
+| `MIYONE_AI_API_KEY` | *not set* | **yes when used** | Only when `MIYONE_AI_PROVIDER=anthropic`; typed into the dashboard, never in the repo |
+| `MIYONE_AI_MODEL` | `claude-sonnet-5` | no | Used only with the anthropic provider; current Sonnet id per the official model list (verified 2026-09-03) |
 | `MIYONE_RESEARCH_PROVIDER` | `none` | no | Live market research **off** for the tester week (owner decision); the Partner says "I can't verify that right now" |
 | `MIYONE_WA_MODE` | `test` | no | Labelled test adapter until Meta credentials exist |
 
@@ -58,7 +58,7 @@ The **demo** environment (hackathon day) is the same blueprint applied a second 
 ## 3. First deployment — exact procedure
 
 1. **Render → Blueprints → New Blueprint Instance**, pick this repository and branch. Render reads `render.yaml` and lists the three resources.
-2. It asks for every `sync: false` value: enter `MIYONE_AI_API_KEY`. Nothing else is secret.
+2. There is nothing secret to enter: the first round runs the local composer, and the database URL is injected by Render.
 3. Apply. Order of events: database created → API built → **`alembic upgrade head` creates the schema** → API starts → `/readiness` turns 200 → web built (with the API's private host:port available) → web starts.
 4. Open `https://miyone-web-<hash>.onrender.com/api/v1/system/readiness` — expect `{"success":true,"data":{"status":"ready","revision":"0001"}}`. This one URL proves browser → Next → FastAPI → PostgreSQL → migrated schema.
 5. Run the verifier from any machine (no secrets needed; it creates two throwaway `verify-…@example.invalid` accounts):
