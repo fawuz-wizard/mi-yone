@@ -112,9 +112,9 @@ All AI/integration features degrade honestly when unconfigured — nothing is fa
 | --- | --- |
 | `MIYONE_DATABASE_URL` | PostgreSQL connection string (overrides default) |
 | `MIYONE_AI_PROVIDER=anthropic` + `MIYONE_AI_API_KEY` | Partner AI replies and photo→product suggestions use the Anthropic model (grounded on deterministic facts only; falls back to the built-in local composer on any failure). Unset = local composer / suggestions honestly reported unavailable. |
-| `MIYONE_AI_MODEL` | Model id (default `claude-sonnet-4-5`) |
+| `MIYONE_AI_MODEL` | Model id (default `claude-sonnet-5`) |
 | `MIYONE_RESEARCH_PROVIDER=anthropic` (+ the AI key above) | Turns on the Partner's market-research lane: real web search with citations. Every research answer must carry sources — no source, no finding. Unset (`none`) = research answers say honestly that it isn't switched on. Searches are billed per search by Anthropic. |
-| `MIYONE_RESEARCH_MODEL` | Model id used for research (default `claude-sonnet-4-5`) |
+| `MIYONE_RESEARCH_MODEL` | Model id used for research (default `claude-sonnet-5`) |
 | `MIYONE_WA_ACCESS_TOKEN` + `MIYONE_WA_CATALOG_ID` | WhatsApp catalog import uses the real Meta Graph adapter. Unset = clearly-labeled TEST adapter. |
 | `MIYONE_UPLOAD_DIR` | Where product photos are stored (default local `uploads/`) |
 

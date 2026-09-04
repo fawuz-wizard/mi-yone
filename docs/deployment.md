@@ -39,7 +39,7 @@ Why one instance and one worker: the rate limiter is in-process and photos are o
 | `MIYONE_UPLOAD_DIR` | `/var/data/uploads` | no | On the persistent disk — photos survive deploys and restarts |
 | `MIYONE_AI_PROVIDER` | `anthropic` | no | Real Partner AI for testers (owner decision) |
 | `MIYONE_AI_API_KEY` | *typed in dashboard* | **yes** | Never in the repo, never in logs |
-| `MIYONE_AI_MODEL` | `claude-sonnet-4-5` | no | Confirm the id against the current model list when the key is entered |
+| `MIYONE_AI_MODEL` | `claude-sonnet-5` | no | Current Sonnet id per the official model list (verified 2026-09-03); re-check when Anthropic announces a new Sonnet |
 | `MIYONE_RESEARCH_PROVIDER` | `none` | no | Live market research **off** for the tester week (owner decision); the Partner says "I can't verify that right now" |
 | `MIYONE_WA_MODE` | `test` | no | Labelled test adapter until Meta credentials exist |
 

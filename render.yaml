@@ -60,7 +60,7 @@ services:
       - key: MIYONE_AI_API_KEY
         sync: false              # SECRET — typed into the dashboard, never here
       - key: MIYONE_AI_MODEL
-        value: claude-sonnet-4-5 # verify against the current model list when the key is set
+        value: claude-sonnet-5   # verified against platform.claude.com/docs/en/models/overview on 2026-09-03
       - key: MIYONE_RESEARCH_PROVIDER
         value: none              # owner decision: live market research OFF for the tester week
       - key: MIYONE_WA_MODE
