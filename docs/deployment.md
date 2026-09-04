@@ -61,12 +61,13 @@ The **demo** environment (hackathon day) is the same blueprint applied a second 
 2. It asks for every `sync: false` value: enter `MIYONE_AI_API_KEY`. Nothing else is secret.
 3. Apply. Order of events: database created → API built → **`alembic upgrade head` creates the schema** → API starts → `/readiness` turns 200 → web built (with the API's private host:port available) → web starts.
 4. Open `https://miyone-web-<hash>.onrender.com/api/v1/system/readiness` — expect `{"success":true,"data":{"status":"ready","revision":"0001"}}`. This one URL proves browser → Next → FastAPI → PostgreSQL → migrated schema.
-5. Open `/welcome`. Sign up a **throwaway** account, record a sale, open Stock, add a product photo.
-6. In Render, **Manual Deploy → Restart** the API service. Reload the app: the sale and the photo are still there (database persistence + disk persistence).
-7. Sign up a **second** throwaway account in another browser. From it, request the first account's business URL (`/api/v1/businesses/<first-id>/products`) — expect **404**. Tenant isolation holds across the real network.
-8. Confirm the session cookie in DevTools → Application → Cookies: `miy_session`, `HttpOnly`, `Secure`, `SameSite=Lax`.
+5. Run the verifier from any machine (no secrets needed; it creates two throwaway `verify-…@example.invalid` accounts):
+   `python3 backend/ops/verify_production.py https://<your-hostname>` — readiness, the 16-step smoke test, tenant-isolation probes, cookie and security checks, one Partner question. Every line prints PASS/FAIL with evidence.
+6. In Render, **Manual Deploy → Restart** the API service, then `python3 backend/ops/verify_production.py https://<your-hostname> --after-restart` — the same user, business, stock, sale, expense, debt, dashboard and photo must still be there.
+7. Also do it by hand once, on a phone: sign up, record a sale, open Stock, add a photo — the verifier proves the API; the phone proves the screens.
+8. Confirm the session cookie in DevTools → Application → Cookies: `miy_session`, `HttpOnly`, `Secure`, `SameSite=Lax` (the verifier checks this too).
 9. **Run the drill** in `backend/ops/RESTORE-DRILL.md` against this database. Record the result in § 7.
-10. Delete the throwaway data so testers start on a clean database: in the API shell, `alembic downgrade base` is **refused** in production (by design) — instead, in Render, delete and recreate `miyone-db` from the blueprint, or run `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` in the database's psql console, then **Manual Deploy** the API so `alembic upgrade head` recreates the empty schema. Confirm `/api/v1/system/readiness` is 200 and `python -m app.ops list-users` prints `0 row(s)`.
+10. Delete the throwaway data so testers start on a clean database (`verify_production.py … --list` names the accounts it created): in the API shell, `alembic downgrade base` is **refused** in production (by design) — instead, in Render, delete and recreate `miyone-db` from the blueprint, or run `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` in the database's psql console, then **Manual Deploy** the API so `alembic upgrade head` recreates the empty schema. Confirm `/api/v1/system/readiness` is 200 and `python -m app.ops list-users` prints `0 row(s)`.
 11. Only now: invite testers (§ 5).
 
 A custom domain is optional: Render → web service → Custom Domains; TLS is automatic. Nothing in the app depends on the hostname.

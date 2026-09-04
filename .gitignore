@@ -12,3 +12,4 @@ backups/
 *.dump.sha256
 .venv/
 __pycache__/
+backend/ops/.verify-state.json
