@@ -1,0 +1,93 @@
+digraph miyone {
+  graph [rankdir=TB, fontname="Helvetica", fontsize=12, compound=true, newrank=true, bgcolor="#FAF7F1", pad=0.4, nodesep=0.35, ranksep=0.7,
+         label="MI YONE — database structure (migration 0001, PostgreSQL 16)\nSolid arrow = foreign key (\"belongs to\").  Dashed arrow = reference id used by the reversal / sale logic.  Every table below the top row carries business_id → businesses (the tenant guard checks it on every request); those 13 arrows are omitted for legibility.",
+         labelloc=t, labeljust=l, fontcolor="#1F1912"];
+  node  [shape=plain, fontname="Helvetica", fontsize=11, fontcolor="#1F1912"];
+  edge  [fontname="Helvetica", fontsize=9, color="#5C544A", fontcolor="#5C544A", arrowsize=0.7];
+
+  // ---------- table nodes: name bar + key columns ----------
+  users [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#3D5A80" align="left"><font color="#FFFFFF"><b>users</b></font></td></tr>
+    <tr><td align="left">id · email (unique) · phone<br/>password_hash (argon2id) · full_name · status</td></tr></table>>];
+  auth_sessions [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#3D5A80" align="left"><font color="#FFFFFF"><b>auth_sessions</b></font></td></tr>
+    <tr><td align="left">id · user_id · token_hash (sha256, unique)<br/>expires_at (30d sliding) · absolute_expires_at (90d) · revoked_at</td></tr></table>>];
+  businesses [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#9A4520" align="left"><font color="#FFFFFF"><b>businesses</b></font></td></tr>
+    <tr><td align="left">id · name · currency (SLE) · country (SL)<br/>status · alert_prefs (Business Watch switches)</td></tr></table>>];
+  business_members [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#9A4520" align="left"><font color="#FFFFFF"><b>business_members</b></font></td></tr>
+    <tr><td align="left">id · business_id · user_id · role (OWNER/ADMIN/STAFF)<br/>status — unique (business, user): one login, many businesses</td></tr></table>>];
+  transaction_categories [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#1B7A4B" align="left"><font color="#FFFFFF"><b>transaction_categories</b></font></td></tr>
+    <tr><td align="left">id · business_id · name · kind (INCOME/EXPENSE) · is_system</td></tr></table>>];
+  transactions [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#1B7A4B" align="left"><font color="#FFFFFF"><b>transactions</b>  — the money ledger (append-only)</font></td></tr>
+    <tr><td align="left">id · business_id · type (INCOME/EXPENSE) · status (POSTED/REVERSED)<br/>amount_minor (BIGINT, &gt; 0) · currency · category_name · description<br/>occurred_at (event) · created_at (entered) · recorded_by · source · entry_method<br/>counterparty_id · debt_id · reverses_transaction_id (unique) · idempotency_key<br/>fixed_by · fixed_was_minor · fixed_now_minor</td></tr></table>>];
+  sales [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#1B7A4B" align="left"><font color="#FFFFFF"><b>sales</b></font></td></tr>
+    <tr><td align="left">id · business_id · total_minor · status (POSTED/REVERSED)<br/>occurred_at · created_at · idempotency_key<br/>cash_transaction_id · receivable_id</td></tr></table>>];
+  products [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#8A5B00" align="left"><font color="#FFFFFF"><b>products</b></font></td></tr>
+    <tr><td align="left">id · business_id · name · unit · selling_minor · cost_minor<br/>low_stock_threshold · track_inventory · archived<br/>description · sku · category · image_key (photo on disk)<br/>origin (manual/photo/whatsapp) · external_id (Meta) · created_at</td></tr></table>>];
+  inventory_movements [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#8A5B00" align="left"><font color="#FFFFFF"><b>inventory_movements</b>  — the stock ledger (append-only)</font></td></tr>
+    <tr><td align="left">id · business_id · product_id · type (PURCHASE/SALE/ADJUSTMENT/DAMAGE)<br/>status (POSTED/REVERSED) · sale_id · idempotency_key<br/>quantity_delta · unit_cost_minor (price recorded at the time)<br/>occurred_at · created_at · recorded_by · note</td></tr></table>>];
+  parties [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#5C544A" align="left"><font color="#FFFFFF"><b>parties</b>  — customers and suppliers</font></td></tr>
+    <tr><td align="left">id · business_id · kind (customer/supplier) · name · phone · notes · archived</td></tr></table>>];
+  debts [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#5C544A" align="left"><font color="#FFFFFF"><b>debts</b>  — owes you / you owe</font></td></tr>
+    <tr><td align="left">id · business_id · kind (receivable/payable) · counterparty_id<br/>amount_minor · settled_minor (≤ amount, DB check) · since · due_date<br/>source (SALE/MANUAL/PURCHASE) · status · idempotency_key · created_at · entry_method</td></tr></table>>];
+  ai_messages [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#9A4520" align="left"><font color="#FFFFFF"><b>ai_messages</b>  — Partner conversation</font></td></tr>
+    <tr><td align="left">id · business_id · role (user/partner) · text · intent<br/>mode (business/web) · blocks_json (labelled answer blocks + sources) · created_at</td></tr></table>>];
+  audit_events [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#8A8177" align="left"><font color="#FFFFFF"><b>audit_events</b></font></td></tr>
+    <tr><td align="left">id · business_id · actor · action · entity_type · entity_id · detail · created_at</td></tr></table>>];
+  catalog_connections [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#8A8177" align="left"><font color="#FFFFFF"><b>catalog_connections</b>  — WhatsApp</font></td></tr>
+    <tr><td align="left">id · business_id · provider · mode (test/live) · status · created_at</td></tr></table>>];
+  catalog_imports [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#8A8177" align="left"><font color="#FFFFFF"><b>catalog_imports</b></font></td></tr>
+    <tr><td align="left">id · business_id · connection_id · status · error · created_at</td></tr></table>>];
+  catalog_import_items [label=<<table border="0" cellborder="1" cellspacing="0" cellpadding="4" bgcolor="#FFFFFF" color="#C9BFB0">
+    <tr><td bgcolor="#8A8177" align="left"><font color="#FFFFFF"><b>catalog_import_items</b></font></td></tr>
+    <tr><td align="left">id · import_id · business_id · name · description · price_minor · image_url<br/>category · sku · availability · external_id · status (pending/approved/skipped)<br/>duplicate_of_product_id · product_id</td></tr></table>>];
+
+  // ---------- foreign keys (solid) ----------
+  auth_sessions -> users [label="user_id"];
+  business_members -> users [label="user_id"];
+  business_members -> businesses [label="business_id"];
+  inventory_movements -> products [label="product_id"];
+  debts -> parties [label="counterparty_id"];
+  catalog_imports -> catalog_connections [label="connection_id"];
+  catalog_import_items -> catalog_imports [label="import_id"];
+
+  // ---------- reference ids that make a sale one unit (dashed) ----------
+  sales -> transactions [label="cash_transaction_id\n(the money-in row)", style=dashed, color="#9A4520", fontcolor="#9A4520"];
+  sales -> debts [label="receivable_id\n(credit sale → owes you)", style=dashed, color="#9A4520", fontcolor="#9A4520"];
+  inventory_movements -> sales [label="sale_id\n(stock moved by this sale)", style=dashed, color="#9A4520", fontcolor="#9A4520"];
+  transactions -> debts [label="debt_id\n(a payment against a debt)", style=dashed, color="#9A4520", fontcolor="#9A4520"];
+  transactions -> transactions [label="reverses_transaction_id\n(a fix never edits — it reverses)", style=dashed, color="#9A4520", fontcolor="#9A4520"];
+  transactions -> parties [label="counterparty_id", style=dashed];
+  catalog_import_items -> products [label="product_id / duplicate_of\n(approve → product)", style=dashed];
+
+  // ---------- grouping ----------
+  subgraph cluster_identity { label="Identity & tenancy"; style="rounded,dashed"; color="#C9BFB0"; fontcolor="#5C544A";
+    users; auth_sessions; businesses; business_members; }
+  subgraph cluster_money { label="Money"; style="rounded,dashed"; color="#C9BFB0"; fontcolor="#5C544A";
+    transactions; transaction_categories; sales; }
+  subgraph cluster_stock { label="Stock"; style="rounded,dashed"; color="#C9BFB0"; fontcolor="#5C544A";
+    products; inventory_movements; }
+  subgraph cluster_people { label="Customers, suppliers, debts"; style="rounded,dashed"; color="#C9BFB0"; fontcolor="#5C544A";
+    parties; debts; }
+  subgraph cluster_ai { label="Partner AI & audit"; style="rounded,dashed"; color="#C9BFB0"; fontcolor="#5C544A";
+    ai_messages; audit_events; }
+  subgraph cluster_wa { label="WhatsApp catalog import"; style="rounded,dashed"; color="#C9BFB0"; fontcolor="#5C544A";
+    catalog_connections; catalog_imports; catalog_import_items; }
+  // invisible edges arrange the clusters in three rows
+  businesses -> transactions [style=invis]; businesses -> products [style=invis]; businesses -> parties [style=invis];
+  sales -> ai_messages [style=invis]; debts -> audit_events [style=invis]; inventory_movements -> catalog_connections [style=invis];
+  { rank=same; users; businesses; }
+}
